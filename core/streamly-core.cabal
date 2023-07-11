@@ -298,6 +298,7 @@ library
                      , Streamly.Internal.Data.Producer
                      , Streamly.Internal.Data.Producer.Source
                      , Streamly.Internal.Data.Parser.ParserK.Type
+                     , Streamly.Internal.Data.Parser.ParserK.Lifted
                      , Streamly.Internal.Data.Parser.ParserD.Type
                      , Streamly.Internal.Data.Pipe.Type
 
