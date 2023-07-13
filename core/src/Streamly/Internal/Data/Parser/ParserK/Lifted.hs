@@ -44,15 +44,11 @@ import Control.Monad (MonadPlus(..), ap)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 -- import Control.Monad.Trans.Class (MonadTrans(lift))
 import GHC.Types (SPEC(..))
-import Streamly.Internal.Data.Array.Generic (Array(..))
-import Streamly.Internal.Data.Array.Generic.Mut.Type (getIndexUnsafeWith)
-import Streamly.Internal.System.IO (unsafeInlineIO)
 
 import qualified Control.Monad.Fail as Fail
-import qualified Streamly.Internal.Data.Array.Generic as Array
 import qualified Streamly.Internal.Data.Parser.ParserD.Type as ParserD
 
-data Input a = None | Chunk (Array a)
+data Input a = None | Chunk a
 
 -- | The intermediate result of running a parser step. The parser driver may
 -- stop with a final result, pause with a continuation to resume, or fail with
@@ -92,13 +88,13 @@ instance Functor m => Functor (Step a m) where
 -- /Pre-release/
 --
 data ParseResult b =
-      Success !Int !b      -- Position index, result
-    | Failure !Int !String -- Position index, error
+      Success !Int !b     -- Leftover count, result
+    | Failure !String     -- Error
 
 -- | Map a function over 'Success'.
 instance Functor ParseResult where
     fmap f (Success n b) = Success n (f b)
-    fmap _ (Failure n e) = Failure n e
+    fmap _ (Failure e) = Failure e
 
 -- XXX Change the type to the shape (a -> m r -> m r) -> (m r -> m r) -> m r
 --
@@ -131,8 +127,8 @@ newtype ParserK a m b = MkParser
            -- negative then backtracking is required before using the array.
            -- The parser should use "Continue -n" in this case if it needs to
            -- consume input. Negative value cannot be beyond the current
-           -- backtrack buffer. Positive value cannot be beyond array length.
-           -- If the parser needs to advance beyond the array length it should
+           -- backtrack buffer. Positive value cannot be beyond array 1gth.
+           -- If the parser needs to advance beyond the array 1gth it should
            -- use "Continue +n".
         -> Int
            -- used elem count, a count of elements consumed by the parser. If
@@ -196,16 +192,16 @@ instance Monad m => Applicative (ParserK a m) where
     {-# INLINE (*>) #-}
     p1 *> p2 = MkParser $ \k n st arr ->
         let k1 (Success n1 _) s input = runParser p2 k n1 s input
-            k1 (Failure n1 e) s input = k (Failure n1 e) s input
+            k1 (Failure e) s input = k (Failure e) s input
         in runParser p1 k1 n st arr
 
     {-# INLINE (<*) #-}
     p1 <* p2 = MkParser $ \k n st arr ->
         let k1 (Success n1 b) s1 input =
                 let k2 (Success n2 _) s2 input2  = k (Success n2 b) s2 input2
-                    k2 (Failure n2 e) s2 input2  = k (Failure n2 e) s2 input2
+                    k2 (Failure e) s2 input2  = k (Failure e) s2 input2
                 in runParser p2 k2 n1 s1 input
-            k1 (Failure n1 e) s1 input = k (Failure n1 e) s1 input
+            k1 (Failure e) s1 input = k (Failure e) s1 input
         in runParser p1 k1 n st arr
 
     {-# INLINE liftA2 #-}
@@ -224,7 +220,7 @@ instance Monad m => Applicative (ParserK a m) where
 --
 {-# INLINE die #-}
 die :: String -> ParserK a m b
-die err = MkParser (\k n st arr -> k (Failure n err) st arr)
+die err = MkParser (\k _ st arr -> k (Failure err) st arr)
 
 -- | Monad composition can be used for lookbehind parsers, we can make the
 -- future parses depend on the previously parsed values.
@@ -275,7 +271,7 @@ instance Monad m => Monad (ParserK a m) where
     {-# INLINE (>>=) #-}
     p >>= f = MkParser $ \k n st arr ->
         let k1 (Success n1 b) s1 inp = runParser (f b) k n1 s1 inp
-            k1 (Failure n1 e) s1 inp = k (Failure n1 e) s1 inp
+            k1 (Failure e) s1 inp = k (Failure e) s1 inp
          in runParser p k1 n st arr
 
     {-# INLINE (>>) #-}
@@ -319,7 +315,7 @@ instance Monad m => Alternative (ParserK a m) where
     {-# INLINE (<|>) #-}
     p1 <|> p2 = MkParser $ \k n _ arr ->
         let
-            k1 (Failure pos _) used input = runParser p2 k (pos - used) 0 input
+            k1 (Failure _) used input = runParser p2 k used 0 input
             k1 success _ input = k success 0 input
         in runParser p1 k1 n 0 arr
 
@@ -373,94 +369,52 @@ parseDToK
     -> Int
     -> Input a
     -> m (Step a m r)
-parseDToK pstep initial extract cont !offset0 !usedCount !input = do
+parseDToK pstep initial extract cont !leftover !usedCount !input = do
     res <- initial
     case res of
         ParserD.IPartial pst -> do
-            case input of
-                Chunk arr -> parseContChunk usedCount offset0 pst arr
-                None -> parseContNothing usedCount pst
-        ParserD.IDone b -> cont (Success offset0 b) usedCount input
-        ParserD.IError err -> cont (Failure offset0 err) usedCount input
+            if leftover == 0
+            then pure $ Partial leftover (parseCont usedCount pst)
+            else
+                case input of
+                    Chunk x -> parseContChunk usedCount pst x
+                    None -> parseContNothing usedCount pst
+        ParserD.IDone b -> cont (Success 0 b) usedCount input
+        ParserD.IError err -> cont (Failure err) usedCount input
 
     where
 
     -- XXX We can maintain an absolute position instead of relative that will
     -- help in reporting of error location in the stream.
     {-# NOINLINE parseContChunk #-}
-    parseContChunk !count !offset !state arr@(Array contents start len) = do
-         if offset >= 0
-         then go SPEC (start + offset) state
-         else return $ Continue offset (parseCont count state)
+    parseContChunk !count !state !x =
+        go SPEC state
 
         where
 
-        {-# INLINE end #-}
-        end = start + len
-
-        {-# INLINE onDone #-}
-        onDone n b =
-            assert (n <= Array.length arr)
-                (cont (Success n b) (count + n - offset) (Chunk arr))
-
-        {-# INLINE callParseCont #-}
-        callParseCont constr n pst1 =
-            assert (n < 0 || n >= Array.length arr)
-                (return $ constr n (parseCont (count + n - offset) pst1))
-
-        {-# INLINE onPartial #-}
-        onPartial = callParseCont Partial
-
-        {-# INLINE onContinue #-}
-        onContinue = callParseCont Continue
-
-        {-# INLINE onError #-}
-        onError n err =
-            cont (Failure n err) (count + n - offset) (Chunk arr)
-
-        {-# INLINE onBack #-}
-        onBack offset1 constr pst = do
-            let pos = offset1 - start
-             in if pos >= 0
-                then go SPEC offset1 pst
-                else constr pos pst
-
-        -- Note: div may be expensive but the alternative is to maintain an element
-        -- offset in addition to a byte offset or just the element offset and use
-        -- multiplication to get the byte offset every time, both these options
-        -- turned out to be more expensive than using div.
-        go !_ !cur !pst | cur >= end =
-            onContinue len  pst
-        go !_ !cur !pst = do
-            let !x = unsafeInlineIO $ getIndexUnsafeWith contents cur
+        go !_ !pst = do
             pRes <- pstep pst x
-            let next = cur + 1
-                back n = next - n
-                curOff = cur - start
-                nextOff = next - start
-            -- The "n" here is stream position index wrt the array start, and
-            -- not the backtrack count as returned by byte stream parsers.
             case pRes of
                 ParserD.Done 0 b ->
-                    onDone nextOff b
+                    cont (Success 1 b) (count + 1) (Chunk x)
                 ParserD.Done 1 b ->
-                    onDone curOff b
+                    cont (Success 0 b) count (Chunk x)
                 ParserD.Done n b ->
-                    onDone (back n - start) b
+                    cont (Success (1 - n) b) (count + 1 - n) (Chunk x)
                 ParserD.Partial 0 pst1 ->
-                    go SPEC next pst1
+                    pure $ Partial 1 (parseCont (count + 1) pst1)
                 ParserD.Partial 1 pst1 ->
-                    go SPEC cur pst1
+                    go SPEC pst1
                 ParserD.Partial n pst1 ->
-                    onBack (back n) onPartial pst1
+                    pure $ Partial (1 - n) (parseCont (count + 1 - n) pst1)
                 ParserD.Continue 0 pst1 ->
-                    go SPEC next pst1
+                    pure $ Continue 1 (parseCont (count + 1) pst1)
                 ParserD.Continue 1 pst1 ->
-                    go SPEC cur pst1
+                    go SPEC pst1
                 ParserD.Continue n pst1 ->
-                    onBack (back n) onContinue pst1
+                    pure $ Continue (1 - n) (parseCont (count + 1 - n) pst1)
                 ParserD.Error err ->
-                    onError curOff err
+                    cont (Failure err) count (Chunk x)
 
     {-# NOINLINE parseContNothing #-}
     parseContNothing !count !pst = do
@@ -478,14 +432,14 @@ parseDToK pstep initial extract cont !offset0 !usedCount !input = do
             ParserD.Error err ->
                 -- XXX It is called only when there is no input arr. So using 0
                 -- as the position is correct?
-                cont (Failure 0 err) count None
+                cont (Failure err) count None
             ParserD.Partial _ _ -> error "Bug: parseDToK Partial unreachable"
 
     -- XXX Maybe we can use two separate continuations instead of using
     -- Just/Nothing cases here. That may help in avoiding the parseContJust
     -- function call.
     {-# INLINE parseCont #-}
-    parseCont !cnt !pst (Chunk arr) = parseContChunk cnt 0 pst arr
+    parseCont !cnt !pst (Chunk x) = parseContChunk cnt pst x
     parseCont !cnt !pst None = parseContNothing cnt pst
 
 -- | Convert a raw byte 'Parser' to a chunked 'ParserK'.
