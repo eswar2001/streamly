@@ -1451,6 +1451,10 @@ parseBreakChunksLifted parser input = do
                  in return (Right b, s1)
             ParserKLifted.Error err -> return (Left (ParseError err), nil)
 
+    seekErr n =
+        error $ "parseBreak: Partial: forward seek not implemented n = "
+            ++ show n
+
     yieldk
         :: [a]
         -> (ParserKLifted.Input a -> m (ParserKLifted.Step a m b))
@@ -1460,31 +1464,37 @@ parseBreakChunksLifted parser input = do
     yieldk backBuf parserk arr stream = do
         pRes <- parserk (ParserKLifted.Chunk arr)
         case pRes of
-            ParserKLifted.Partial n cont1 ->
-                if n == 1
-                then go [] cont1 stream
-                else do
-                    let n1 = negate n
-                        bufLen = length backBuf
-                        s = cons arr stream -- XXX Not required in the future
-                    assertM(n1 >= 0 && n1 <= bufLen)
-                    let (s1, _) = backTrackLifted n1 backBuf s
-                    go [] cont1 s1
-            ParserKLifted.Continue n cont1 ->
-                if n == 1
-                then go (arr:backBuf) cont1 stream
-                else do
-                    let n1 = negate n
-                        bufLen = length backBuf
-                        s = cons arr stream -- XXX Not required in the future
-                    assertM(n1 >= 0 && n1 <= bufLen)
-                    let (s1, backBuf1) = backTrackLifted n1 backBuf s
-                    go backBuf1 cont1 s1
+            ParserKLifted.Partial 1 cont1 -> go [] cont1 stream
+            ParserKLifted.Partial 0 cont1 -> go [] cont1 (cons arr stream)
+            ParserKLifted.Partial n _ | n > 1 -> seekErr n
+            ParserKLifted.Partial n cont1 -> do
+                let n1 = negate n
+                    bufLen = length backBuf
+                    s = cons arr stream
+                assertM(n1 >= 0 && n1 <= bufLen)
+                let (s1, _) = backTrackLifted n1 backBuf s
+                go [] cont1 s1
+            ParserKLifted.Continue 1 cont1 -> go (arr:backBuf) cont1 stream
+            ParserKLifted.Continue 0 cont1 ->
+                go backBuf cont1 (cons arr stream)
+            ParserKLifted.Continue n _ | n > 1 -> seekErr n
+            ParserKLifted.Continue n cont1 -> do
+                let n1 = negate n
+                    bufLen = length backBuf
+                    s = cons arr stream
+                assertM(n1 >= 0 && n1 <= bufLen)
+                let (s1, backBuf1) = backTrackLifted n1 backBuf s
+                go backBuf1 cont1 s1
+            ParserKLifted.Done 1 b -> pure (Right b, stream)
+            ParserKLifted.Done 0 b -> pure (Right b, cons arr stream)
+            ParserKLifted.Done n _ | n > 1 -> seekErr n
             ParserKLifted.Done n b -> do
                 let n1 = negate n
-                assertM(n1 <= length (arr:backBuf))
-                let (s1, _) = backTrackLifted n1 (arr:backBuf) stream
-                 in return (Right b, s1)
+                    bufLen = length backBuf
+                    s = cons arr stream
+                assertM(n1 >= 0 && n1 <= bufLen)
+                let (s1, _) = backTrackLifted n1 backBuf s
+                pure (Right b, s1)
             ParserKLifted.Error err -> return (Left (ParseError err), nil)
 
     go
