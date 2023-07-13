@@ -204,7 +204,6 @@ import Streamly.Internal.Data.SVar.Type (adaptState, defState)
 import Streamly.Internal.Data.Unboxed (sizeOf, Unbox)
 import Streamly.Internal.Data.Parser.ParserK.Type (ParserK)
 
-import qualified Streamly.Internal.Data.Array.Generic as GenericArr
 import qualified Streamly.Internal.Data.Array.Type as Array
 import qualified Streamly.Internal.Data.Fold.Type as FL
 import qualified Streamly.Internal.Data.Parser as Parser
@@ -1279,26 +1278,16 @@ backTrack = go
 -- XXX Document the order of the backtrack buffer
 -- XXX Document this properly
 {-# INLINE backTrackLifted #-}
-backTrackLifted ::
-       Int
-    -> [GenericArr.Array a]
-    -> StreamK m (GenericArr.Array a)
-    -> (StreamK m (GenericArr.Array a), [GenericArr.Array a])
+backTrackLifted :: Int -> [a] -> StreamK m a -> (StreamK m a, [a])
 backTrackLifted = go
 
     where
 
     go _ [] stream = (stream, [])
     go n xs stream | n <= 0 = (stream, xs)
-    go n (x:xs) stream =
-        let len = GenericArr.length x
-        in if n > len
-           then go (n - len) xs (cons x stream)
-           else if n == len
-           then (cons x stream, xs)
-           else let arr1 = GenericArr.getSliceUnsafe (len - n) n x
-                    arr2 = GenericArr.getSliceUnsafe 0 (len - n) x
-                 in (cons arr1 stream, arr2:xs)
+    go n xs stream =
+        let (appendBuf, newBTBuf) = splitAt n xs
+         in (append (fromList (Prelude.reverse appendBuf)) stream, newBTBuf)
 
 -- | A continuation to extract the result when a CPS parser is done.
 {-# INLINE parserDone #-}
@@ -1312,7 +1301,7 @@ parserDone (ParserK.Failure n e) _ _ = pure $ ParserK.Error n e
 parserDoneLifted :: Applicative m =>
     ParserKLifted.ParseResult b -> Int -> ParserKLifted.Input a -> m (ParserKLifted.Step a m b)
 parserDoneLifted (ParserKLifted.Success n b) _ _ = pure $ ParserKLifted.Done n b
-parserDoneLifted (ParserKLifted.Failure n e) _ _ = pure $ ParserKLifted.Error n e
+parserDoneLifted (ParserKLifted.Failure e) _ _ = pure $ ParserKLifted.Error e
 
 -- XXX parseDBreakChunks may be faster than converting parserD to parserK and
 -- using parseBreakChunks. We can also use parseBreak as an alternative to the
@@ -1420,8 +1409,8 @@ parseChunks f = fmap fst . parseBreakChunks f
 parseBreakChunksLifted
     :: forall m a b. Monad m
     => ParserKLifted.ParserK a m b
-    -> StreamK m (GenericArr.Array a)
-    -> m (Either ParseError b, StreamK m (GenericArr.Array a))
+    -> StreamK m a
+    -> m (Either ParseError b, StreamK m a)
 parseBreakChunksLifted parser input = do
     let parserk = ParserKLifted.runParser parser parserDoneLifted 0 0
      in go [] parserk input
@@ -1430,9 +1419,9 @@ parseBreakChunksLifted parser input = do
 
     {-# INLINE goStop #-}
     goStop
-        :: [GenericArr.Array a]
+        :: [a]
         -> (ParserKLifted.Input a -> m (ParserKLifted.Step a m b))
-        -> m (Either ParseError b, StreamK m (GenericArr.Array a))
+        -> m (Either ParseError b, StreamK m a)
     goStop backBuf parserk = do
         pRes <- parserk ParserKLifted.None
         case pRes of
@@ -1443,79 +1432,66 @@ parseBreakChunksLifted parser input = do
                  go [] cont1 nil
             ParserKLifted.Partial n cont1 -> do
                 let n1 = negate n
-                assertM(n1 >= 0 && n1 <= sum (Prelude.map GenericArr.length backBuf))
+                assertM(n1 >= 0 && n1 <= length backBuf)
                 let (s1, backBuf1) = backTrackLifted n1 backBuf nil
                  in go backBuf1 cont1 s1
             ParserKLifted.Continue 0 cont1 ->
                 go backBuf cont1 nil
             ParserKLifted.Continue n cont1 -> do
                 let n1 = negate n
-                assertM(n1 >= 0 && n1 <= sum (Prelude.map GenericArr.length backBuf))
+                assertM(n1 >= 0 && n1 <= length backBuf)
                 let (s1, backBuf1) = backTrackLifted n1 backBuf nil
                  in go backBuf1 cont1 s1
             ParserKLifted.Done 0 b ->
                 return (Right b, nil)
             ParserKLifted.Done n b -> do
                 let n1 = negate n
-                assertM(n1 >= 0 && n1 <= sum (Prelude.map GenericArr.length backBuf))
+                assertM(n1 >= 0 && n1 <= length backBuf)
                 let (s1, _) = backTrackLifted n1 backBuf nil
                  in return (Right b, s1)
-            ParserKLifted.Error _ err -> return (Left (ParseError err), nil)
-
-    seekErr n len =
-        error $ "parseBreak: Partial: forward seek not implemented n = "
-            ++ show n ++ " len = " ++ show len
+            ParserKLifted.Error err -> return (Left (ParseError err), nil)
 
     yieldk
-        :: [GenericArr.Array a]
+        :: [a]
         -> (ParserKLifted.Input a -> m (ParserKLifted.Step a m b))
-        -> GenericArr.Array a
-        -> StreamK m (GenericArr.Array a)
-        -> m (Either ParseError b, StreamK m (GenericArr.Array a))
+        -> a
+        -> StreamK m a
+        -> m (Either ParseError b, StreamK m a)
     yieldk backBuf parserk arr stream = do
         pRes <- parserk (ParserKLifted.Chunk arr)
-        let len = GenericArr.length arr
         case pRes of
             ParserKLifted.Partial n cont1 ->
-                case compare n len of
-                    EQ -> go [] cont1 stream
-                    LT -> do
-                        if n >= 0
-                        then yieldk [] cont1 arr stream
-                        else do
-                            let n1 = negate n
-                                bufLen = sum (Prelude.map GenericArr.length backBuf)
-                                s = cons arr stream
-                            assertM(n1 >= 0 && n1 <= bufLen)
-                            let (s1, _) = backTrackLifted n1 backBuf s
-                            go [] cont1 s1
-                    GT -> seekErr n len
+                if n == 1
+                then go [] cont1 stream
+                else do
+                    let n1 = negate n
+                        bufLen = length backBuf
+                        s = cons arr stream -- XXX Not required in the future
+                    assertM(n1 >= 0 && n1 <= bufLen)
+                    let (s1, _) = backTrackLifted n1 backBuf s
+                    go [] cont1 s1
             ParserKLifted.Continue n cont1 ->
-                case compare n len of
-                    EQ -> go (arr:backBuf) cont1 stream
-                    LT -> do
-                        if n >= 0
-                        then yieldk backBuf cont1 arr stream
-                        else do
-                            let n1 = negate n
-                                bufLen = sum (Prelude.map GenericArr.length backBuf)
-                                s = cons arr stream
-                            assertM(n1 >= 0 && n1 <= bufLen)
-                            let (s1, backBuf1) = backTrackLifted n1 backBuf s
-                            go backBuf1 cont1 s1
-                    GT -> seekErr n len
+                if n == 1
+                then go (arr:backBuf) cont1 stream
+                else do
+                    let n1 = negate n
+                        bufLen = length backBuf
+                        s = cons arr stream -- XXX Not required in the future
+                    assertM(n1 >= 0 && n1 <= bufLen)
+                    let (s1, backBuf1) = backTrackLifted n1 backBuf s
+                    go backBuf1 cont1 s1
             ParserKLifted.Done n b -> do
-                let n1 = len - n
-                assertM(n1 <= sum (Prelude.map GenericArr.length (arr:backBuf)))
+                let n1 = negate n
+                assertM(n1 <= length (arr:backBuf))
                 let (s1, _) = backTrackLifted n1 (arr:backBuf) stream
                  in return (Right b, s1)
-            ParserKLifted.Error _ err -> return (Left (ParseError err), nil)
+            ParserKLifted.Error err -> return (Left (ParseError err), nil)
 
     go
-        :: [GenericArr.Array a]
+        :: [a]
         -> (ParserKLifted.Input a -> m (ParserKLifted.Step a m b))
-        -> StreamK m (GenericArr.Array a)
-        -> m (Either ParseError b, StreamK m (GenericArr.Array a))
+        -> StreamK m a
+        -> m (Either ParseError b, StreamK m a)
     go backBuf parserk stream = do
         let stop = goStop backBuf parserk
             single a = yieldk backBuf parserk a nil

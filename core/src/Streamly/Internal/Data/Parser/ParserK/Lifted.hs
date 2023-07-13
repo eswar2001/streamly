@@ -69,13 +69,13 @@ data Step a m r =
       -- Array a -> m (Step a m r), m (Step a m r)
     | Partial !Int (Input a -> m (Step a m r))
     | Continue !Int (Input a -> m (Step a m r))
-    | Error !Int String
+    | Error String
 
 instance Functor m => Functor (Step a m) where
     fmap f (Done n r) = Done n (f r)
     fmap f (Partial n k) = Partial n (fmap (fmap f) . k)
     fmap f (Continue n k) = Continue n (fmap (fmap f) . k)
-    fmap _ (Error n e) = Error n e
+    fmap _ (Error e) = Error e
 
 -- Note: Passing position index separately instead of passing it with the
 -- result causes huge regression in expression parsing becnhmarks.
