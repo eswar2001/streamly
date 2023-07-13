@@ -369,16 +369,16 @@ parseDToK
     -> Int
     -> Input a
     -> m (Step a m r)
-parseDToK pstep initial extract cont !leftover !usedCount !input = do
+parseDToK pstep initial extract cont !relPos !usedCount !input = do
     res <- initial
     case res of
         ParserD.IPartial pst -> do
-            if leftover == 0
+            if relPos == 0
             then
                 case input of
                     Chunk x -> parseContChunk usedCount pst x
                     None -> parseContNothing usedCount pst
-            else pure $ Partial leftover (parseCont usedCount pst)
+            else pure $ Partial relPos (parseCont usedCount pst)
         ParserD.IDone b -> cont (Success 0 b) usedCount input
         ParserD.IError err -> cont (Failure err) usedCount input
 
