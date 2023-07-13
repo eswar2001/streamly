@@ -374,11 +374,11 @@ parseDToK pstep initial extract cont !leftover !usedCount !input = do
     case res of
         ParserD.IPartial pst -> do
             if leftover == 0
-            then pure $ Partial leftover (parseCont usedCount pst)
-            else
+            then
                 case input of
                     Chunk x -> parseContChunk usedCount pst x
                     None -> parseContNothing usedCount pst
+            else pure $ Partial leftover (parseCont usedCount pst)
         ParserD.IDone b -> cont (Success 0 b) usedCount input
         ParserD.IError err -> cont (Failure err) usedCount input
 
