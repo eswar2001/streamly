@@ -60,10 +60,7 @@ data Input a = None | Single a
 -- /Pre-release/
 --
 data Step a m r =
-    -- The Int is the relative stream position to move to.
-    -- 0 means try the current element again
-    -- 1 means try the next element
-    -- -1 backtrack by 1 element
+      -- The Int is the number of elements to backtrack.
       Done !Int r
       -- XXX we can use a "resume" and a "stop" continuations instead of Maybe.
       -- measure if that works any better.
@@ -83,12 +80,12 @@ instance Functor m => Functor (Step a m) where
 
 -- | The parser's result.
 --
--- Int is the relative stream position to move to. Could be negative.
+-- Int is the number of elements to backtrack.
 --
 -- /Pre-release/
 --
 data ParseResult b =
-      Success !Int !b     -- Relative stream position, result
+      Success !Int !b     -- Leftover, result
     | Failure !String     -- Error
 
 -- | Map a function over 'Success'.
@@ -125,12 +122,7 @@ newtype ParserK a m b = MkParser
            -- way we can also report better errors. Use a Context structure for
            -- passing the state.
 
-           -- Relative stream position. If
-           -- negative then backtracking is required.
-           -- The parser should use "Continue -n" in this case if it needs to
-           -- backtrack. Negative value cannot be beyond the current
-           -- backtrack buffer. Positive value cannot be beyond 1.
-           -- Only single element forward tracking is possible now.
+           -- Number of elements to backtrack
         -> Int
            -- Used elem count, a count of elements consumed by the parser. If
            -- an Alternative fails we need to backtrack by this amount.
@@ -312,7 +304,7 @@ instance Monad m => Alternative (ParserK a m) where
     {-# INLINE (<|>) #-}
     p1 <|> p2 = MkParser $ \k n _ arr ->
         let
-            k1 (Failure _) used input = runParser p2 k (- used) 0 input
+            k1 (Failure _) used input = runParser p2 k used 0 input
             k1 success _ input = k success 0 input
         in runParser p1 k1 n 0 arr
 
@@ -366,16 +358,11 @@ parseDToK
     -> Int
     -> Input a
     -> m (Step a m r)
-parseDToK pstep initial extract cont !relPos !usedCount !input = do
+parseDToK pstep initial extract cont !leftover !usedCount !input = do
     res <- initial
     case res of
-        ParserD.IPartial pst -> do
-            if relPos == 0
-            then
-                case input of
-                    Single x -> parseContSingle usedCount pst x
-                    None -> parseContNothing usedCount pst
-            else pure $ Partial relPos (parseCont usedCount pst)
+        ParserD.IPartial pst ->
+            pure $ Partial leftover (parseCont usedCount pst)
         ParserD.IDone b -> cont (Success 0 b) usedCount input
         ParserD.IError err -> cont (Failure err) usedCount input
 
@@ -393,23 +380,27 @@ parseDToK pstep initial extract cont !relPos !usedCount !input = do
             pRes <- pstep pst x
             case pRes of
                 ParserD.Done 0 b ->
-                    cont (Success 1 b) (count + 1) (Single x)
+                    cont (Success 0 b) (count + 1) (Single x)
                 ParserD.Done 1 b ->
-                    cont (Success 0 b) count (Single x)
+                    cont (Success 1 b) count (Single x)
                 ParserD.Done n b ->
-                    cont (Success (1 - n) b) (count + 1 - n) (Single x)
+                    cont (Success n b) (count + 1 - n) (Single x)
                 ParserD.Partial 0 pst1 ->
-                    pure $ Partial 1 (parseCont (count + 1) pst1)
+                    pure $ Partial 0 (parseCont (count + 1) pst1)
                 ParserD.Partial 1 pst1 ->
+                    -- XXX Should we loop here or give the control to the
+                    -- driver?
                     go SPEC pst1
                 ParserD.Partial n pst1 ->
-                    pure $ Partial (1 - n) (parseCont (count + 1 - n) pst1)
+                    pure $ Partial n (parseCont (count + 1 - n) pst1)
                 ParserD.Continue 0 pst1 ->
-                    pure $ Continue 1 (parseCont (count + 1) pst1)
+                    pure $ Continue 0 (parseCont (count + 1) pst1)
                 ParserD.Continue 1 pst1 ->
+                    -- XXX Should we loop here or give the control to the
+                    -- driver?
                     go SPEC pst1
                 ParserD.Continue n pst1 ->
-                    pure $ Continue (1 - n) (parseCont (count + 1 - n) pst1)
+                    pure $ Continue n (parseCont (count + 1 - n) pst1)
                 ParserD.Error err ->
                     cont (Failure err) count (Single x)
 
@@ -417,15 +408,14 @@ parseDToK pstep initial extract cont !relPos !usedCount !input = do
     parseContNothing !count !pst = do
         r <- extract pst
         case r of
-            -- IMPORTANT: the n here is from the byte stream parser, that means
-            -- it is the backtrack element count and not the relative stream
-            -- position.
+            -- IMPORTANT: In ParserD and ParserK the meaning on "n" is the same.
+            -- It is currently different for the ChunkParserK.
             ParserD.Done n b ->
                 assert (n >= 0)
-                    (cont (Success (- n) b) (count - n) None)
+                    (cont (Success n b) (count - n) None)
             ParserD.Continue n pst1 ->
                 assert (n >= 0)
-                    (return $ Continue (- n) (parseCont (count - n) pst1))
+                    (return $ Continue n (parseCont (count - n) pst1))
             ParserD.Error err ->
                 cont (Failure err) count None
             ParserD.Partial _ _ -> error "Bug: parseDToK Partial unreachable"

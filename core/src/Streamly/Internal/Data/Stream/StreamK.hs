@@ -1181,7 +1181,7 @@ parseDBreak (PR.Parser pstep initial extract) stream = do
                         let src0 = Prelude.take n buf
                             src  = Prelude.reverse src0
                         return (Right b, fromList src)
-                    PR.Partial _ _ -> error "Bug: parseBreak: Partial in extract"
+                    PR.Partial _ _ -> error "Bug: parseDBreak: Partial in extract"
                     PR.Continue 0 s -> goStream nil buf s
                     PR.Continue n s -> do
                         assertM(n <= length buf)
@@ -1353,7 +1353,7 @@ parseBreakChunks parser input = do
             CParserK.Error _ err -> return (Left (ParseError err), nil)
 
     seekErr n len =
-        error $ "parseBreak: Partial: forward seek not implemented n = "
+        error $ "parseBreakChunks: Partial: forward seek not implemented n = "
             ++ show n ++ " len = " ++ show len
 
     yieldk backBuf parserk arr stream = do
@@ -1432,31 +1432,29 @@ parseBreak parser input = do
             -- parser, the next parser may call initial returning Partial and
             -- then immediately we have to call extract on it.
             ParserK.Partial 0 cont1 ->
+                 -- XXX This is an infinite loop!
                  go [] cont1 nil
             ParserK.Partial n cont1 -> do
-                let n1 = negate n
+                let n1 = n
                 assertM(n1 >= 0 && n1 <= length backBuf)
                 let (s1, backBuf1) = backTrack n1 backBuf nil
                  in go backBuf1 cont1 s1
             ParserK.Continue 0 cont1 ->
+                -- XXX This is an infinite loop!
                 go backBuf cont1 nil
             ParserK.Continue n cont1 -> do
-                let n1 = negate n
+                let n1 = n
                 assertM(n1 >= 0 && n1 <= length backBuf)
                 let (s1, backBuf1) = backTrack n1 backBuf nil
                  in go backBuf1 cont1 s1
             ParserK.Done 0 b ->
                 return (Right b, nil)
             ParserK.Done n b -> do
-                let n1 = negate n
+                let n1 = n
                 assertM(n1 >= 0 && n1 <= length backBuf)
                 let (s1, _) = backTrack n1 backBuf nil
                  in return (Right b, s1)
             ParserK.Error err -> return (Left (ParseError err), nil)
-
-    seekErr n =
-        error $ "parseBreak: Partial: forward seek not implemented n = "
-            ++ show n
 
     yieldk
         :: [a]
@@ -1467,36 +1465,33 @@ parseBreak parser input = do
     yieldk backBuf parserk arr stream = do
         pRes <- parserk (ParserK.Single arr)
         case pRes of
-            ParserK.Partial 1 cont1 -> go [] cont1 stream
-            ParserK.Partial 0 cont1 -> go [] cont1 (cons arr stream)
-            ParserK.Partial n _ | n > 1 -> seekErr n
+            ParserK.Partial 0 cont1 -> go [] cont1 stream
+            ParserK.Partial 1 cont1 -> go [] cont1 (cons arr stream)
             ParserK.Partial n cont1 -> do
-                let n1 = negate n
-                    bufLen = length backBuf
-                    s = cons arr stream
+                let n1 = n
+                    backBuf1 = arr:backBuf
+                    bufLen = length backBuf1
                 assertM(n1 >= 0 && n1 <= bufLen)
-                let (s1, _) = backTrack n1 backBuf s
+                let (s1, _) = backTrack n1 backBuf1 stream
                 go [] cont1 s1
-            ParserK.Continue 1 cont1 -> go (arr:backBuf) cont1 stream
-            ParserK.Continue 0 cont1 ->
+            ParserK.Continue 0 cont1 -> go (arr:backBuf) cont1 stream
+            ParserK.Continue 1 cont1 ->
                 go backBuf cont1 (cons arr stream)
-            ParserK.Continue n _ | n > 1 -> seekErr n
             ParserK.Continue n cont1 -> do
-                let n1 = negate n
-                    bufLen = length backBuf
-                    s = cons arr stream
+                let n1 = n
+                    backBuf1 = arr:backBuf
+                    bufLen = length backBuf1
                 assertM(n1 >= 0 && n1 <= bufLen)
-                let (s1, backBuf1) = backTrack n1 backBuf s
-                go backBuf1 cont1 s1
-            ParserK.Done 1 b -> pure (Right b, stream)
-            ParserK.Done 0 b -> pure (Right b, cons arr stream)
-            ParserK.Done n _ | n > 1 -> seekErr n
+                let (s1, backBuf2) = backTrack n1 backBuf1 stream
+                go backBuf2 cont1 s1
+            ParserK.Done 0 b -> pure (Right b, stream)
+            ParserK.Done 1 b -> pure (Right b, cons arr stream)
             ParserK.Done n b -> do
-                let n1 = negate n
+                let n1 = n
+                    backBuf1 = arr:backBuf
                     bufLen = length backBuf
-                    s = cons arr stream
                 assertM(n1 >= 0 && n1 <= bufLen)
-                let (s1, _) = backTrack n1 backBuf s
+                let (s1, _) = backTrack n1 backBuf1 stream
                 pure (Right b, s1)
             ParserK.Error err -> return (Left (ParseError err), nil)
 
