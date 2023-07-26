@@ -407,6 +407,7 @@ benchmark Data.Parser.ParserK
   import: bench-options
   type: exitcode-stdio-1.0
   hs-source-dirs: Streamly/Benchmark/Data/Parser
+  cpp-options: -DBENCH_NON_CHUNKED
   main-is: ParserK.hs
   if impl(ghcjs)
     buildable: False
@@ -419,6 +420,18 @@ benchmark Data.Parser.ParserK.Chunked
   type: exitcode-stdio-1.0
   hs-source-dirs: Streamly/Benchmark/Data/Parser
   cpp-options: -DBENCH_CHUNKED
+  main-is: ParserK.hs
+  if impl(ghcjs)
+    buildable: False
+  else
+    buildable: True
+    build-depends: exceptions >= 0.8   && < 0.11
+
+benchmark Data.Parser.ParserK.Chunked.Generic
+  import: bench-options
+  type: exitcode-stdio-1.0
+  hs-source-dirs: Streamly/Benchmark/Data/Parser
+  cpp-options: -DBENCH_CHUNKED_GENERIC
   main-is: ParserK.hs
   if impl(ghcjs)
     buildable: False

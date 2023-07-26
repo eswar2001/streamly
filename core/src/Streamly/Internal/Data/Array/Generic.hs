@@ -22,6 +22,8 @@ module Streamly.Internal.Data.Array.Generic
     , fromListN
     , fromList
 
+    , chunksOf
+
     -- * Elimination
     , length
     , reader
@@ -111,6 +113,15 @@ writeWith elemCount = unsafeFreeze <$> MArray.writeWith elemCount
 {-# INLINE write #-}
 write :: MonadIO m => Fold m a (Array a)
 write = fmap unsafeFreeze MArray.write
+
+-------------------------------------------------------------------------------
+-- Stream Ops
+-------------------------------------------------------------------------------
+
+{-# INLINE_NORMAL chunksOf #-}
+chunksOf :: forall m a. MonadIO m
+    => Int -> Stream m a -> Stream m (Array a)
+chunksOf n strm = fmap unsafeFreeze $ MArray.chunksOf n strm
 
 -------------------------------------------------------------------------------
 -- Construction - from streams

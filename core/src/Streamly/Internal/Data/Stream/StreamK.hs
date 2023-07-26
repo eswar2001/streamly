@@ -89,6 +89,7 @@ module Streamly.Internal.Data.Stream.StreamK
     , parseD
     , parseBreakChunks
     , parseBreakChunksLifted
+    , parseChunksLifted
     , parseChunks
     , parseBreak
     , parse
@@ -206,6 +207,7 @@ import Streamly.Internal.Data.SVar.Type (adaptState, defState)
 import Streamly.Internal.Data.Unboxed (sizeOf, Unbox)
 import Streamly.Internal.Data.Parser.ParserK.Type (ParserK)
 import Streamly.Internal.Data.Parser.ParserK.Chunked (ChunkParserK)
+import qualified Streamly.Internal.Data.Parser.ParserK.Lifted as Lif (ParserK)
 
 import qualified Streamly.Internal.Data.Array.Generic as GenericArr
 import qualified Streamly.Internal.Data.Array.Type as Array
@@ -1656,6 +1658,14 @@ parseBreakChunksLifted parser input = do
             single a = yieldk backBuf parserk a nil
          in foldStream
                 defState (yieldk backBuf parserk) single stop stream
+
+{-# INLINE parseChunksLifted #-}
+parseChunksLifted ::
+       (Monad m)
+    => Lif.ParserK a m b
+    -> StreamK m (GenericArr.Array a)
+    -> m (Either ParseError b)
+parseChunksLifted f = fmap fst . parseBreakChunksLifted f
 
 -------------------------------------------------------------------------------
 -- Sorting

@@ -24,6 +24,10 @@ import Data.Foldable (asum)
 #ifdef BENCH_CHUNKED
 import Streamly.Data.Array (Array, Unbox)
 #endif
+#ifdef BENCH_CHUNKED_GENERIC
+import Streamly.Data.Array.Generic (Array)
+import qualified Streamly.Internal.Data.Array.Generic as GenArr (chunksOf)
+#endif
 import Streamly.Internal.Data.Fold.Type (Fold(..))
 import Streamly.Data.StreamK (StreamK)
 import Streamly.Internal.Data.Parser
@@ -42,7 +46,11 @@ import qualified Streamly.Internal.Data.Fold as Fold
 import qualified Streamly.Data.Parser as PRD
 #ifdef BENCH_CHUNKED
 import qualified Streamly.Data.ParserK.Chunked as PR
-#else
+#endif
+#ifdef BENCH_CHUNKED_GENERIC
+import qualified Streamly.Internal.Data.Parser.ParserK.Lifted as PR
+#endif
+#ifdef BENCH_NON_CHUNKED
 import qualified Streamly.Data.ParserK as PR
 #endif
 import qualified Streamly.Internal.Data.Stream.StreamK as StreamK
@@ -55,17 +63,33 @@ import Streamly.Benchmark.Common
 -------------------------------------------------------------------------------
 
 #ifdef BENCH_CHUNKED
+
 #define PARSE_OP StreamK.parseChunks
 #define PARSE_ELEM (Array Int)
 #define CONSTRAINT_IO (MonadIO m, Unbox a)
 #define CONSTRAINT (Monad m, Unbox a)
 #define PARSER_TYPE PR.ChunkParserK
-#else
+
+#endif
+
+#ifdef BENCH_CHUNKED_GENERIC
+
+#define PARSE_OP StreamK.parseChunksLifted
+#define PARSE_ELEM (Array Int)
+#define CONSTRAINT_IO (MonadIO m)
+#define CONSTRAINT (Monad m)
+#define PARSER_TYPE PR.ParserK
+
+#endif
+
+#ifdef BENCH_NON_CHUNKED
+
 #define PARSE_OP StreamK.parse
 #define PARSE_ELEM Int
 #define CONSTRAINT_IO (MonadIO m)
 #define CONSTRAINT (Monad m)
 #define PARSER_TYPE PR.ParserK
+
 #endif
 
 -------------------------------------------------------------------------------
@@ -95,6 +119,9 @@ benchIOSink value name f =
 #ifdef BENCH_CHUNKED
             . Stream.chunksOf 4000
 #endif
+#ifdef BENCH_CHUNKED_GENERIC
+            . GenArr.chunksOf 4000
+#endif
             . sourceUnfoldrM value
 
 -------------------------------------------------------------------------------
@@ -109,7 +136,7 @@ one value = PARSE_OP p
     where
 
     p = do
-        m <- PR.fromFold FL.one
+        m <- PR.fromParser (PRD.fromFold FL.one)
         case m of
           Just i -> if i >= value then pure m else p
           Nothing -> pure Nothing
