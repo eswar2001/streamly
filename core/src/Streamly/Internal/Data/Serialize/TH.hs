@@ -471,8 +471,12 @@ mkTypeHashExpr headTy constructors = hashHeadDt
 
 deriveTypeHashInternal :: Cxt -> Type -> [DataCon] -> Q [Dec]
 deriveTypeHashInternal preds headTy cons = do
+    inlineStatement <- pragInlD 'typeHash Inline FunLike AllPhases
     typeHashMethod <- mkTypeHashExpr headTy cons
-    let methods = [FunD 'typeHash [Clause [WildP] (NormalB typeHashMethod) []]]
+    let methods =
+            [ inlineStatement
+            , FunD 'typeHash [Clause [WildP] (NormalB typeHashMethod) []]
+            ]
     return [plainInstanceD preds (AppT (ConT ''TypeHash) headTy) methods]
 
 deriveTypeHashWith :: [String] -> Name -> Q [Dec]
