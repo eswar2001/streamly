@@ -11,6 +11,11 @@
 module Streamly.Internal.Data.Serialize.TH
     ( deriveSerialize
     , deriveSerializeWith
+    , Test(..)
+    , Test2(..)
+    , deriveTypeHashWith
+    , TypeHash(..)
+    , combineTypeHash
     ) where
 
 --------------------------------------------------------------------------------
@@ -22,6 +27,9 @@ import Data.Word (Word16, Word32, Word64, Word8)
 import Language.Haskell.TH
 import Language.Haskell.TH.Syntax
 import Streamly.Internal.Data.Serialize
+
+import Data.Proxy
+import Data.List (foldl')
 
 import Streamly.Internal.Data.Unbox.TH
     ( DataCon(..)
@@ -414,3 +422,80 @@ deriveSerializeWith vars name = do
 #else
         ClassP ''Serialize [ty]
 #endif
+
+--------------------------------------------------------------------------------
+-- Type hash
+--------------------------------------------------------------------------------
+
+type Hash = String
+
+combineTypeHash :: Hash -> Hash -> Hash
+combineTypeHash h1 h2 = h1 ++ "_" ++ h2
+
+concatHashList :: [Hash] -> Hash
+concatHashList = mconcat
+
+class TypeHash a where
+    typeHash :: Proxy a -> Hash
+
+instance TypeHash Int where
+    typeHash _ = "Int"
+
+--------------------------------------------------------------------------------
+-- TH
+--------------------------------------------------------------------------------
+
+mkTypeHashExpr :: Type -> [DataCon] -> Q Exp
+mkTypeHashExpr headTy constructors = hashHeadDt
+  where
+    combineTypeHashExp exp1 exp2 = appsE [varE 'combineTypeHash, exp1, exp2]
+    hashField (i, (_, ty)) =
+        combineTypeHashExp
+            (stringE (show (i :: Int)))
+            (appE
+                 (varE 'typeHash)
+                 (sigE (conE 'Proxy) (appT (conT ''Proxy) (pure ty))))
+    hashDataCon (i, (DataCon cname _ _ fields)) =
+        foldl'
+            combineTypeHashExp
+            (stringE (show (i :: Int) ++ "_" ++ pprint cname))
+            (map hashField (zip [0 ..] fields))
+    hashHeadDt =
+        foldl'
+            combineTypeHashExp
+            (stringE (pprint headTy))
+            (map hashDataCon (zip [0 ..] constructors))
+
+deriveTypeHashInternal :: Cxt -> Type -> [DataCon] -> Q [Dec]
+deriveTypeHashInternal preds headTy cons = do
+    typeHashMethod <- mkTypeHashExpr headTy cons
+    let methods = [FunD 'typeHash [Clause [WildP] (NormalB typeHashMethod) []]]
+    return [plainInstanceD preds (AppT (ConT ''TypeHash) headTy) methods]
+
+deriveTypeHashWith :: [String] -> Name -> Q [Dec]
+deriveTypeHashWith vars name = do
+    dt <- reifyDataType name
+    let preds = map (unboxPred . VarT) (fmap mkName vars)
+        headTy = appsT (ConT name) (map VarT (dtTvs dt))
+        cons = dtCons dt
+    deriveTypeHashInternal preds headTy cons
+
+    where
+
+    unboxPred ty =
+#if MIN_VERSION_template_haskell(2,10,0)
+        AppT (ConT ''Serialize) ty
+#else
+        ClassP ''Serialize [ty]
+#endif
+
+
+data Test =
+    Test
+        { field0 :: Int
+        , field1 :: Test2
+        , field2 :: Int
+        }
+
+data Test2 =
+    Con21 Int
