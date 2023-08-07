@@ -449,9 +449,12 @@ mkTypeHashExpr :: Type -> [DataCon] -> Q Exp
 mkTypeHashExpr headTy constructors = hashHeadDt
   where
     combineTypeHashExp exp1 exp2 = appsE [varE 'combineTypeHash, exp1, exp2]
-    hashField (i, (_, ty)) =
+    hashField (i, (mfn, ty)) =
         combineTypeHashExp
-            (stringE (show (i :: Int)))
+            (stringE
+                 (case mfn of
+                      Nothing -> show (i :: Int)
+                      Just fn -> show (i :: Int) ++ "_" ++ show fn))
             (appE
                  (varE 'typeHash)
                  (sigE (conE 'Proxy) (appT (conT ''Proxy) (pure ty))))
@@ -494,7 +497,7 @@ data Test =
     Test
         { field0 :: Int
         , field1 :: Test2
-        , field2 :: Int
+        , field3 :: Int
         }
 
 data Test2 =
