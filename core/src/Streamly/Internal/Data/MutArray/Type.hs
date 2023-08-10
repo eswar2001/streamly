@@ -222,6 +222,7 @@ module Streamly.Internal.Data.MutArray.Type
     , roundUpToPower2
     , memcpy
     , memcmp
+    , memcmp1
     , c_memchr
     )
 where
@@ -302,6 +303,16 @@ bytesToElemCount _ n = n `div` SIZE_OF(a)
 -- XXX we are converting Int to CSize
 memcpy :: Ptr Word8 -> Ptr Word8 -> Int -> IO ()
 memcpy dst src len = void (c_memcpy dst src (fromIntegral len))
+
+{-# INLINE memcmp1 #-}
+memcmp1 :: Ptr Word8 -> Ptr Word8 -> Int -> IO Ordering
+memcmp1 p1 p2 len = do
+    res <- c_memcmp p1 p2 (fromIntegral len)
+    pure
+        $ case res of
+              r | r == 0 -> EQ
+                | r < 0 -> LT
+                | otherwise -> GT
 
 -- XXX we are converting Int to CSize
 -- return True if the memory locations have identical contents
