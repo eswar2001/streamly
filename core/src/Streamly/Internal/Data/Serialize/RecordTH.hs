@@ -123,13 +123,11 @@ exprGetSize i (Just tag, ty) = do
                    Nothing -> 0
                    Just x ->
                        case size of
-                           ConstSize sz -> $(commonExp) + sz
-                           VarSize f -> $(commonExp) + f x|]
+                           Size f -> $(commonExp) + f x|]
         else [|case $(varE (mkFieldName i)) of
                    x ->
                        case size of
-                           ConstSize sz -> $(commonExp) + sz
-                           VarSize f -> $(commonExp) + f x|]
+                           Size f -> $(commonExp) + f x|]
 
 --------------------------------------------------------------------------------
 -- Size
@@ -144,12 +142,11 @@ mkSizeOfExpr headTy constructors =
     case constructors of
         -- One constructor with no fields is a unit type. Size of a unit type is
         -- 1.
-        [constructor@(DataCon _ _ _ fields)] ->
+        [constructor@(DataCon _ _ _ fields@(_:_))] ->
             case fields of
-                [] -> appE (conE 'ConstSize) (litIntegral (1 :: Int))
                 _ ->
                     appE
-                        (conE 'VarSize)
+                        (conE 'Size)
                         (lamE
                              [varP n_x]
                              (caseE (varE n_x) [matchCons constructor]))

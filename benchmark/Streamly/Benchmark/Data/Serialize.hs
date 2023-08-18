@@ -1,4 +1,5 @@
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE DuplicateRecordFields #-}
 
 #undef FUSION_CHECK
 #ifdef FUSION_CHECK
@@ -17,6 +18,7 @@ module Main (main) where
 -- Imports
 -------------------------------------------------------------------------------
 
+import Data.Word (Word16)
 import Control.DeepSeq (NFData(..))
 import Control.Exception (assert)
 import GHC.Generics (Generic)
@@ -30,7 +32,7 @@ import Data.Proxy (Proxy(..))
 import Streamly.Internal.Data.Unbox
 #else
 import Control.DeepSeq (force)
-import Test.QuickCheck (oneof, generate)
+import Test.QuickCheck (oneof, elements, generate)
 import Streamly.Internal.Data.Unbox (newBytes, MutableByteArray)
 import Streamly.Internal.Data.Serialize
 #endif
@@ -57,6 +59,26 @@ import Streamly.Benchmark.Common
 #define SERIALIZE_OP serialize
 #define DESERIALIZE_OP deserialize
 #endif
+
+import Data.Time
+import Data.Time.Calendar.OrdinalDate
+import Data.Time.LocalTime
+
+import qualified Data.Text as T
+import qualified Data.Text.Array as TArr (Array(..))
+
+import Data.Text.Internal (Text(..))
+import Streamly.Internal.Data.Array.Type (Array(..))
+import Streamly.Internal.Data.Unbox (MutableByteArray(..))
+import qualified Streamly.Internal.Data.Unbox as Unbox
+
+import GHC.Exts
+
+import GHC.Num.Integer
+import GHC.Int
+import Data.Proxy (Proxy(..))
+
+import Data.Fixed
 
 -------------------------------------------------------------------------------
 -- Types
@@ -367,6 +389,414 @@ roundtrip :: (Eq a, SERIALIZE_CLASS a) => a -> Int -> IO ()
 roundtrip val times = loop times trip val
 
 -------------------------------------------------------------------------------
+-- Record
+-------------------------------------------------------------------------------
+
+unpackInt :: Int -> Int#
+unpackInt (I# i#) = i#
+
+data LiftedInteger
+    = LIS Int
+    | LIP MutableByteArray
+    | LIN MutableByteArray
+
+$(deriveSerialize ''LiftedInteger)
+
+-- How costly is the boxing going to be?
+
+liftInteger :: Integer -> LiftedInteger
+liftInteger (IS x) = LIS (I# x)
+liftInteger (IP x) = LIP (MutableByteArray (unsafeCoerce# x))
+liftInteger (IN x) = LIN (MutableByteArray (unsafeCoerce# x))
+
+unliftInteger :: LiftedInteger -> Integer
+unliftInteger (LIS (I# x)) = IS x
+unliftInteger (LIP (MutableByteArray x)) = IP (unsafeCoerce# x)
+unliftInteger (LIN (MutableByteArray x)) = IN (unsafeCoerce# x)
+
+$(deriveSerialize ''E12)
+$(deriveSerialize ''Fixed)
+
+instance Serialize Integer where
+    {-# INLINE size #-}
+    size =
+        Size $ \i a ->
+            case size :: Size LiftedInteger of
+                Size f -> f i (liftInteger a)
+
+    {-# INLINE deserialize #-}
+    deserialize off arr = fmap unliftInteger <$> deserialize off arr
+
+    {-# INLINE serialize #-}
+    serialize off arr val = serialize off arr (liftInteger val)
+
+$(deriveSerialize ''Maybe)
+$(deriveSerialize ''Day)
+$(deriveSerialize ''TimeOfDay)
+$(deriveSerialize ''LocalTime)
+
+instance Arbitrary Day where
+    arbitrary = fromOrdinalDate <$> arbitrary <*> arbitrary
+
+instance Arbitrary TimeOfDay where
+    arbitrary =
+        TimeOfDay <$> arbitrary <*> arbitrary <*> (MkFixed <$> arbitrary)
+
+instance Arbitrary LocalTime where
+    arbitrary = LocalTime <$> arbitrary <*> arbitrary
+
+instance Serialize Text where
+    {-# INLINE size #-}
+    size =
+        Size $ \i a ->
+            case size :: Size (Array Word16) of
+                Size f -> f i (txtToArr a)
+
+    {-# INLINE deserialize #-}
+    deserialize off arr = fmap arrToTxt <$> deserialize off arr
+
+    {-# INLINE serialize #-}
+    serialize off arr val = serialize off arr (txtToArr val)
+
+-- | Convert a 'Text' to an array of 'Word16'. It can be done in constant time.
+{-# INLINE txtToArr #-}
+txtToArr :: Text -> Array Word16
+txtToArr (Text (TArr.Array _) _ len)
+    | len == 0 = Array Unbox.nil 0 0
+txtToArr (Text (TArr.Array barr#) off16 len16) =
+    let off8 = off16 * 2
+        len8 = len16 * 2
+    in Array (MutableByteArray (unsafeCoerce# barr#)) off8 (off8 + len8)
+
+{-# INLINE arrToTxt #-}
+arrToTxt :: Array Word16 -> Text
+arrToTxt Array {..}
+    | len8 == 0 = T.empty
+    | otherwise = Text (TArr.Array (unsafeCoerce# marr#)) off16 len16
+
+    where
+
+    len8 = arrEnd - arrStart
+    off8 = arrStart
+    len16 = len8 `div` 2
+    off16 = off8 `div` 2
+    !(MutableByteArray marr#) = arrContents
+
+instance Arbitrary Text where
+    arbitrary = T.pack <$> arbitrary
+
+data TransactionMode
+    = IFSC
+    | UPI
+    deriving (Generic, Show, Eq, Ord, Read, Enum)
+
+instance Arbitrary TransactionMode where
+    arbitrary = elements [IFSC, UPI]
+
+$(deriveSerialize ''TransactionMode)
+
+data TransactionType
+    = PAY
+    | COLLECT
+    deriving (Generic, Show, Eq, Ord, Read, Enum)
+
+instance Arbitrary TransactionType where
+    arbitrary = elements [PAY, COLLECT]
+
+$(deriveSerialize ''TransactionType)
+
+data TransactionStatus
+    = SUCCESS
+    | FAILURE
+    | PENDING
+    | EXPIRED
+    | DECLINED
+    | TIMED_OUT
+    | DEEMED
+    | COLLECT_PAY_INITIATED
+    | DECLINE_INITIATED
+    | REVERSED
+    | NOT_FOUND
+    deriving (Generic, Show, Eq, Ord, Read, Enum)
+
+instance Arbitrary TransactionStatus where
+    arbitrary =
+        elements
+            [ SUCCESS
+            , FAILURE
+            , PENDING
+            , EXPIRED
+            , DECLINED
+            , TIMED_OUT
+            , DEEMED
+            , COLLECT_PAY_INITIATED
+            , DECLINE_INITIATED
+            , REVERSED
+            , NOT_FOUND
+            ]
+
+$(deriveSerialize ''TransactionStatus)
+
+data TransactionChannel
+    = USSD
+    | ANDROID
+    | IOS
+    | SDK
+    deriving (Generic, Show, Eq, Ord, Read, Enum)
+
+instance Arbitrary TransactionChannel where
+    arbitrary = elements [USSD, ANDROID, IOS, SDK]
+
+$(deriveSerialize ''TransactionChannel)
+
+data TransactionCallbackStatus
+    = CALLBACK_SUCCESS
+    | CALLBACK_FAILURE
+    | CALLBACK_PENDING
+    | CALLBACK_UNINITIATED
+    | CALLBACK_DEEMED
+    deriving (Generic, Show, Eq, Ord, Read, Enum)
+
+instance Arbitrary TransactionCallbackStatus where
+    arbitrary =
+        elements
+            [ CALLBACK_SUCCESS
+            , CALLBACK_FAILURE
+            , CALLBACK_PENDING
+            , CALLBACK_UNINITIATED
+            , CALLBACK_DEEMED
+            ]
+
+$(deriveSerialize ''TransactionCallbackStatus)
+
+data CollectType
+    = TRANSACTION
+    | MANDATE
+    deriving (Generic, Show, Eq, Ord, Read, Enum)
+
+instance Arbitrary CollectType where
+    arbitrary = elements [TRANSACTION, MANDATE]
+
+$(deriveSerialize ''CollectType)
+
+-- add more fields if required to PayerInfo
+data PayerInfo  =
+  PayerInfo
+    { _accountNumber :: !(Maybe Text)
+    , _accountNumberHash :: !(Maybe Text)
+    , _ifsc :: !(Maybe Text)
+    , _accountHash :: !(Maybe Text)
+    , _bankIIN :: !(Maybe Text)
+    , _maskedAccountNumber :: !(Maybe Text)
+    , _payerNumber :: !(Maybe Text)
+    , _payerNumberHash :: !(Maybe Text)
+    , _payerName :: !(Maybe Text)
+    , _payerNameHash :: !(Maybe Text)
+    , _payerMobileNumber :: !(Maybe Text)
+    , _payerMobileNumberHash :: !(Maybe Text)
+    , _upiNumber :: !(Maybe Text)
+    , _upiNumberHash :: !(Maybe Text)
+    , _someDum :: !(Maybe Text)
+    } deriving (Show, Eq, Generic, Ord)
+
+$(deriveSerialize ''PayerInfo)
+
+instance Arbitrary PayerInfo where
+    arbitrary =
+        PayerInfo <$> arbitrary <*> arbitrary <*> arbitrary <*> arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary
+
+-- add more fields if required to PayeeInfo
+data PayeeInfo  =
+  PayeeInfo
+    { _vpa :: !(Maybe Text)
+    , _vpaHash :: !(Maybe Text)
+    , _isVerifiedPayee :: !(Maybe Bool)
+    , _name :: !(Maybe Text)
+    , _nameHash :: !(Maybe Text)
+    , _mobileNumber :: !(Maybe Text)
+    , _mobileNumberHash :: !(Maybe Text)
+    , _isMarkedSpam :: !(Maybe Bool)
+    , _upiNumber :: !(Maybe Text)
+    , _upiNumberHash :: !(Maybe Text)
+    , _maskedAccountNumber :: !(Maybe Text)
+    , _bankIIN :: !(Maybe Text)
+    } deriving (Show, Eq, Generic, Ord)
+
+$(deriveSerialize ''PayeeInfo)
+
+instance Arbitrary PayeeInfo where
+    arbitrary =
+        PayeeInfo <$> arbitrary <*> arbitrary <*> arbitrary <*> arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary
+
+-- add more fields if required to NpciResponse
+data NpciResponse  =
+  NpciResponse
+    { _error :: !(Maybe Bool)
+    , _code :: !(Maybe Text)
+    , _result :: !Text
+    , _note :: !(Maybe Text)
+    , _errCode :: !(Maybe Text)
+    , _errorCode :: !(Maybe Text)
+    , _userMessage :: !(Maybe Text)
+    , _sherlockError :: !(Maybe Bool)
+    , _orgErrCode :: !(Maybe Text)
+    , _orgStatus :: !(Maybe Text)
+    } deriving (Show, Eq, Generic, Ord)
+
+instance Arbitrary NpciResponse where
+    arbitrary =
+        NpciResponse <$> arbitrary <*> arbitrary <*> arbitrary <*> arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary
+
+$(deriveSerialize ''NpciResponse)
+
+-- add more fields if required to TxnInfo
+data TxnInfo  =
+  TxnInfo
+    { _payType :: !Text              -- "payType"
+    , _udfParameters :: !(Maybe Text)
+    , _merchantRequestId :: !(Maybe Text)
+    , _merchantCustomerId :: !(Maybe Text)
+    -- The following fields are wildly unchecked, and additional
+    -- fields may be missing.
+    -- (JSON field names from DB are labeled in quotes.)
+    , _tiEntity :: !(Maybe Text)         -- "mc"
+    , _tiPayeeAddress :: !(Maybe Text)   -- "pa"
+    , _tiPayeeAddressHash :: !(Maybe Text)   -- "hashed pa"
+    , _tiPayeeName :: !(Maybe Text)      -- "pn"
+    , _tiPayeeNameHash :: !(Maybe Text)      -- "hashed pn"
+    , _tiPayeeMcc :: !(Maybe Text)       -- "mc"
+    , _tiTxnRef :: !(Maybe Text)         -- "tr"
+    , _tiTxnNote :: !(Maybe Text)        -- "tn"
+    , _tiTxnMinimumAmount :: !(Maybe Text) -- "mam"
+    , _tiRefUrl :: !(Maybe Text)         -- "url"
+    , _tiPayeeCurency :: !(Maybe Text)   -- "curr"
+    , _tiMerchantRequestId :: !(Maybe Text) -- "mr"
+    , _tiRiskScore :: !(Maybe Text) -- "riskScore"
+    , _tiCode :: !(Maybe Text)
+    , _tpvRefFailed :: !(Maybe Bool)
+    } deriving (Show, Eq, Generic, Ord)
+
+$(deriveSerialize ''TxnInfo)
+
+instance Arbitrary TxnInfo where
+    arbitrary =
+        TxnInfo <$> arbitrary <*> arbitrary <*> arbitrary <*> arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary
+
+data Transaction  = Transaction
+  { _id :: !Text
+  , _payerVpa :: !(Maybe Text)
+  , _payerVpaHash :: !(Maybe Text)
+  , _payeeVpa :: !(Maybe Text)
+  , _payeeVpaHash :: !(Maybe Text)
+  , _payerInfo :: !(Maybe PayerInfo)
+  , _payeeInfo :: !(Maybe PayeeInfo)
+  , _txnInfo :: !(Maybe TxnInfo)
+  , _selfInitiated :: !(Maybe Bool)
+  , _mode :: !TransactionMode
+  , _amount :: !Double
+  , _upiRequestId :: !Text
+  , __type :: !TransactionType
+  , _status :: !TransactionStatus
+  , _upiMsgId :: !(Maybe Text)
+  , _npciResponse :: !(Maybe NpciResponse)
+  , _remarks :: !Text
+  , _expiry :: !(Maybe LocalTime)
+  , _currency :: !Text
+  , _upiResponseId :: !(Maybe Text)
+  , __CustomerId :: !(Maybe Text)
+  , __MerchantId :: !(Maybe Text)
+  , __MerchantCustomerId :: !(Maybe Text)
+  , _channel :: !(Maybe TransactionChannel)
+  , _callbackSent :: !(Maybe Bool)
+  , _callbackStatus :: !(Maybe TransactionCallbackStatus)
+  , _completedAt :: !(Maybe LocalTime)
+  , _initiationMode :: !(Maybe Text)
+  , _purpose :: !(Maybe Text)
+  , __MandateId :: !(Maybe Text)
+  , _seqNumber :: !(Maybe Int)
+  , _createdAt :: !LocalTime
+  , _updatedAt :: !LocalTime
+  , _myval :: !(Maybe Text)
+  } deriving (Generic, Show, Eq)
+
+$(deriveSerialize ''Transaction)
+
+instance Arbitrary Transaction where
+    arbitrary =
+        Transaction <$> arbitrary <*> arbitrary <*> arbitrary <*> arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary <*>
+        arbitrary
+
+
+-------------------------------------------------------------------------------
 -- Benchmarks
 -------------------------------------------------------------------------------
 
@@ -413,6 +843,19 @@ benchVar gname f tInt lInt times =
         , let !n = getSize lInt
            in benchSink "list-int" times (f n lInt)
         ]
+
+{-# INLINE benchTransaction #-}
+benchTransaction ::
+       String
+    -> (forall a. (Eq a, SERIALIZE_CLASS a) => Int -> a -> Int -> IO ())
+    -> Transaction
+    -> Int
+    -> Benchmark
+benchTransaction gname f transaction times =
+    bgroup gname
+        [ let !n = getSize transaction
+           in benchSink "Transaction" times (f n transaction)
+        ]
 #endif
 
 -- Times is scaled by the number of constructors to normalize
@@ -420,8 +863,8 @@ benchVar gname f tInt lInt times =
 allBenchmarks :: Int -> [Benchmark]
 allBenchmarks times =
 #else
-allBenchmarks :: BinTree Int -> [Int] -> Int -> [Benchmark]
-allBenchmarks tInt lInt times =
+allBenchmarks :: BinTree Int -> [Int] -> Transaction -> Int -> [Benchmark]
+allBenchmarks tInt lInt transaction times =
 #endif
     [ bgroup "sizeOf"
         [
@@ -439,6 +882,10 @@ allBenchmarks tInt lInt times =
     , benchVar "pokeWithSize" (const pokeTimesWithSize) tInt lInt 1
     , benchVar "peek" peekTimes tInt lInt 1
     , benchVar "roundtrip" (const roundtrip) tInt lInt 1
+    , benchTransaction "poke" (const pokeTimes) transaction 1
+    , benchTransaction "pokeWithSize" (const pokeTimesWithSize) transaction 1
+    , benchTransaction "peek" peekTimes transaction 1
+    , benchTransaction "roundtrip" (const roundtrip) transaction 1
 #endif
     ]
 
@@ -458,6 +905,11 @@ main = do
     -- per element.
     let lInt = [1..50000 :: Int]
     let !len = length lInt -- evaluate the list
+
+
+    !(transaction :: Transaction) <- generate arbitrary
+    -- print transaction
+    -- undefined
 #endif
 #ifndef FUSION_CHECK
     -- This can take too much memory/CPU, need to restrict the test
@@ -465,7 +917,7 @@ main = do
 #ifdef USE_UNBOX
     runWithCLIOpts defaultStreamSize allBenchmarks
 #else
-    len `seq` runWithCLIOpts defaultStreamSize (allBenchmarks tInt lInt)
+    len `seq` runWithCLIOpts defaultStreamSize (allBenchmarks tInt lInt transaction)
 #endif
 #else
     -- Enable FUSION_CHECK macro at the beginning of the file
