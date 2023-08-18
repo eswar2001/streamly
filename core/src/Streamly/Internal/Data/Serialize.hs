@@ -251,7 +251,7 @@ instance Serialize MutableByteArray where
         MutArray.putSliceUnsafe arrayed 0 dst off1 arrLen
         pure (off1 + arrLen)
 
-instance forall a. (Unbox a, Show a) => Serialize (Array a) where
+instance Serialize (Array a) where
     {-# INLINE size #-}
     size = Size $ \i (Array {..}) -> i + (arrEnd - arrStart) + 8
 
