@@ -499,8 +499,8 @@ unpackInt (I# i#) = i#
 
 data LiftedInteger
     = LIS Int
-    | LIP MutableByteArray
-    | LIN MutableByteArray
+    | LIP (Array Word)
+    | LIN (Array Word)
 
 $(deriveSerialize ''LiftedInteger)
 
@@ -508,13 +508,15 @@ $(deriveSerialize ''LiftedInteger)
 
 liftInteger :: Integer -> LiftedInteger
 liftInteger (IS x) = LIS (I# x)
-liftInteger (IP x) = LIP (MutableByteArray (unsafeCoerce# x))
-liftInteger (IN x) = LIN (MutableByteArray (unsafeCoerce# x))
+liftInteger (IP x) =
+    LIP (Array (MutableByteArray (unsafeCoerce# x)) 0 (I# (sizeofByteArray# x)))
+liftInteger (IN x) =
+    LIN (Array (MutableByteArray (unsafeCoerce# x)) 0 (I# (sizeofByteArray# x)))
 
 unliftInteger :: LiftedInteger -> Integer
 unliftInteger (LIS (I# x)) = IS x
-unliftInteger (LIP (MutableByteArray x)) = IP (unsafeCoerce# x)
-unliftInteger (LIN (MutableByteArray x)) = IN (unsafeCoerce# x)
+unliftInteger (LIP (Array (MutableByteArray x) _ _)) = IP (unsafeCoerce# x)
+unliftInteger (LIN (Array (MutableByteArray x) _ _)) = IN (unsafeCoerce# x)
 
 $(deriveSerialize ''E12)
 $(deriveSerialize ''Fixed)
