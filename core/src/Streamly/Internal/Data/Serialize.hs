@@ -41,6 +41,7 @@ import GHC.Stable (StablePtr(..))
 
 import qualified Streamly.Internal.Data.Unbox as Unbox
 import qualified Streamly.Internal.Data.Array as Array
+import qualified Streamly.Internal.Data.MutArray as MutArray
 
 import GHC.Exts
 
@@ -223,6 +224,53 @@ instance forall a. Serialize a => Serialize [a] where
               o1 <- serialize o arr x
               pokeList o1 xs
         pokeList off1 val
+
+instance Serialize MutableByteArray where
+    {-# INLINE size #-}
+    size =
+        Size $ \i val ->
+            i + unsafeInlineIO (Unbox.sizeOfMutableByteArray val)
+              + Unbox.sizeOf (Proxy :: Proxy Int)
+
+    {-# INLINE deserialize #-}
+    deserialize off arr = do
+        (byteLen, off1) <- deserialize off arr :: IO (Int, Int)
+        let off2 = off1 + byteLen
+        let slice = MutArray.MutArray arr off1 off2 off2
+        newArr <- MutArray.clone slice
+        pure (off2, MutArray.arrContents newArr)
+
+    {-# INLINE serialize #-}
+    serialize off arr val = do
+        arrLen <- Unbox.sizeOfMutableByteArray val
+        let arrayed = MutArray.MutArray val 0 arrLen arrLen
+        off1 <- serialize off arr arrLen
+        let off2 = off1 + arrLen
+        let dst = MutArray.MutArray arr off1 off2 off2
+        MutArray.putSliceUnsafe arrayed 0 dst off1 arrLen
+        pure (off1 + arrLen)
+
+instance Serialize (Array a) where
+    {-# INLINE size #-}
+    size = Size $ \i (Array {..}) -> i + (arrEnd - arrStart) + 8
+
+    {-# INLINE deserialize #-}
+    deserialize off arr = do
+        (byteLen, off1) <- deserialize off arr :: IO (Int, Int)
+        let off2 = off1 + byteLen
+        let slice = MutArray.MutArray arr off1 off2 off2
+        newArr <- MutArray.clone slice
+        pure (off2, Array.unsafeFreeze newArr)
+
+    {-# INLINE serialize #-}
+    serialize off arr val@(Array {..}) = do
+        let arrLen = arrEnd - arrStart
+        let thawed = Array.unsafeThaw val
+        off1 <- serialize off arr arrLen
+        let off2 = off1 + arrLen
+        let dst = MutArray.MutArray arr off1 off2 off2
+        MutArray.putSliceUnsafe thawed arrStart dst off1 arrLen
+        pure (off1 + arrLen)
 
 --------------------------------------------------------------------------------
 -- High level functions
