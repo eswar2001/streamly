@@ -3,3 +3,10 @@ packages:   streamly.cabal
           , test/streamly-tests.cabal
           , benchmark/streamly-benchmarks.cabal
           , docs/streamly-docs.cabal
+
+-- source-repository-package
+--    type: git
+--    location: https://github.com/neeraj97/store.git
+--    tag: d5af8e8324a72ef29900f57ff2dc3a7f5b834a73
+
+write-ghc-environment-files: always

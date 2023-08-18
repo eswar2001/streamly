@@ -56,14 +56,14 @@ let haskellPackages =
                     streamly-docs =
                         mkPackage super "streamly-docs"
                             ./docs flags inShell;
-
-                    #fusion-plugin =
-                    #  super.callHackageDirect
-                    #    { pkg = "fusion-plugin";
-                    #      ver = "0.2.3";
-                    #      sha256 = "073wbhdxj1sh5160blaihbzkkhabs8s71pqhag16lvmgbb7a3hla";
-                    #    } {};
-
+/*
+                    store =
+                        let src = fetchGit {
+                            url = "https://github.com/neeraj97/store.git";
+                            rev = "d5af8e8324a72ef29900f57ff2dc3a7f5b834a73";
+                            ref = "support-for-backward-compatibility-fieldname";
+                          }; in super.callCabal2nix "store" "${src}" {};
+*/
                     lockfree-queue =
                       super.callHackageDirect
                         { pkg = "lockfree-queue";

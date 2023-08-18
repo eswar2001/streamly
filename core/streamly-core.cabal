@@ -304,6 +304,7 @@ library
                      , Streamly.Internal.Data.Unbox.TH
                      , Streamly.Internal.Data.Serialize.TH
                      , Streamly.Internal.Data.Serialize.RecordTH
+                     , Streamly.Internal.Data.Serialize.JInternal
 
                      -- Unboxed IORef
                      , Streamly.Internal.Data.IORef.Unboxed
@@ -465,6 +466,12 @@ library
                      -- XXX to be removed
                      , containers        >= 0.6.0 && < 0.7
                      , heaps             >= 0.3   && < 0.5
+
+                  , bytestring
+                  , text
+                  , store
+                  , th-utilities
+                  , store-core
     if !flag(use-unliftio)
       build-depends:   monad-control     >= 1.0 && < 1.1
 
