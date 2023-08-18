@@ -388,11 +388,11 @@ trip val = do
         <- DESERIALIZE_OP 0 arr
     assert (val == val1) (pure ())
     -- So that the compiler does not optimize it out
-    {-
+
     if (val1 /= val)
     then error "roundtrip: no match"
     else return ()
-    -}
+
     return ()
 
 {-# INLINE roundtrip #-}
@@ -467,11 +467,11 @@ tripStore val = do
                Right res -> res
     assert (val == val1) (pure ())
     -- So that the compiler does not optimize it out
-    {-
+
     if (val1 /= val)
     then error "roundtrip: no match"
     else return ()
-    -}
+
     return ()
 
 {-# INLINE roundtripStore #-}
