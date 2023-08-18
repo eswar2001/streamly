@@ -1,6 +1,17 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE DuplicateRecordFields #-}
 
+{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE CPP #-}
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE MagicHash #-}
+{-# LANGUAGE ParallelListComp #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
+
 #undef FUSION_CHECK
 #ifdef FUSION_CHECK
 {-# OPTIONS_GHC -ddump-simpl -ddump-to-file -dsuppress-all #-}
@@ -95,6 +106,9 @@ import qualified Data.Store.Internal as Store
 
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString.Internal as BS
+
+import qualified Streamly.Internal.Data.Serialize.RecordTH as RecordTH
+import qualified Streamly.Internal.Data.Serialize.JInternal as JInternal
 
 -------------------------------------------------------------------------------
 -- Types
@@ -893,43 +907,46 @@ instance Arbitrary TxnInfo where
 
 data Transaction  = Transaction
   { _id :: !Text
-  , _payerVpa :: !(Maybe Text)
-  , _payerVpaHash :: !(Maybe Text)
-  , _payeeVpa :: !(Maybe Text)
-  , _payeeVpaHash :: !(Maybe Text)
-  , _payerInfo :: !(Maybe PayerInfo)
-  , _payeeInfo :: !(Maybe PayeeInfo)
-  , _txnInfo :: !(Maybe TxnInfo)
-  , _selfInitiated :: !(Maybe Bool)
   , _mode :: !TransactionMode
-  , _amount :: !Double
-  , _upiRequestId :: !Text
   , __type :: !TransactionType
-  , _status :: !TransactionStatus
-  , _upiMsgId :: !(Maybe Text)
-  , _npciResponse :: !(Maybe NpciResponse)
-  , _remarks :: !Text
+  , _myval :: !(Maybe Text)
+  , _amount :: !Double
   , _expiry :: !(Maybe LocalTime)
+  , _status :: !TransactionStatus
+  , _channel :: !(Maybe TransactionChannel)
+  , _purpose :: !(Maybe Text)
+  , _remarks :: !Text
+  , _txnInfo :: !(Maybe TxnInfo)
   , _currency :: !Text
-  , _upiResponseId :: !(Maybe Text)
+  , _payeeVpa :: !(Maybe Text)
+  , _payerVpa :: !(Maybe Text)
+  , _upiMsgId :: !(Maybe Text)
+  , _createdAt :: !LocalTime
+  , _payeeInfo :: !(Maybe PayeeInfo)
+  , _payerInfo :: !(Maybe PayerInfo)
+  , _seqNumber :: !(Maybe Int)
+  , _updatedAt :: !LocalTime
+  , __MandateId :: !(Maybe Text)
   , __CustomerId :: !(Maybe Text)
   , __MerchantId :: !(Maybe Text)
-  , __MerchantCustomerId :: !(Maybe Text)
-  , _channel :: !(Maybe TransactionChannel)
-  , _callbackSent :: !(Maybe Bool)
-  , _callbackStatus :: !(Maybe TransactionCallbackStatus)
   , _completedAt :: !(Maybe LocalTime)
+  , _callbackSent :: !(Maybe Bool)
+  , _npciResponse :: !(Maybe NpciResponse)
+  , _payeeVpaHash :: !(Maybe Text)
+  , _payerVpaHash :: !(Maybe Text)
+  , _upiRequestId :: !Text
+  , _selfInitiated :: !(Maybe Bool)
+  , _upiResponseId :: !(Maybe Text)
+  , _callbackStatus :: !(Maybe TransactionCallbackStatus)
   , _initiationMode :: !(Maybe Text)
-  , _purpose :: !(Maybe Text)
-  , __MandateId :: !(Maybe Text)
-  , _seqNumber :: !(Maybe Int)
-  , _createdAt :: !LocalTime
-  , _updatedAt :: !LocalTime
-  , _myval :: !(Maybe Text)
+  , __MerchantCustomerId :: !(Maybe Text)
   } deriving (Generic, Show, Eq)
 
 $(deriveSerialize ''Transaction)
 $(makeStore ''Transaction)
+
+-- $(RecordTH.deriveSerialize ''Transaction)
+-- $(JInternal.makeJStore ''Transaction)
 
 instance Arbitrary Transaction where
     arbitrary =
