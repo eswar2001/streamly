@@ -882,10 +882,10 @@ allBenchmarks tInt lInt transaction times =
     , benchVar "pokeWithSize" (const pokeTimesWithSize) tInt lInt 1
     , benchVar "peek" peekTimes tInt lInt 1
     , benchVar "roundtrip" (const roundtrip) tInt lInt 1
-    , benchTransaction "poke" (const pokeTimes) transaction 1
-    , benchTransaction "pokeWithSize" (const pokeTimesWithSize) transaction 1
-    , benchTransaction "peek" peekTimes transaction 1
-    , benchTransaction "roundtrip" (const roundtrip) transaction 1
+    , benchTransaction "poke" (const pokeTimes) transaction (times `div` 25)
+    , benchTransaction "pokeWithSize" (const pokeTimesWithSize) transaction (times `div` 25)
+    , benchTransaction "peek" peekTimes transaction (times `div` 25)
+    , benchTransaction "roundtrip" (const roundtrip) transaction (times `div` 25)
 #endif
     ]
 
