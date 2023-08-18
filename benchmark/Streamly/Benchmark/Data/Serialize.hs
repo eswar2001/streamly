@@ -375,7 +375,7 @@ peekTimes n val times = do
     loopWith times peek val arr
 
 {-# INLINE trip #-}
-trip :: forall a. (Eq a, SERIALIZE_CLASS a) => a -> IO ()
+trip :: forall a. (Show a, Eq a, SERIALIZE_CLASS a) => a -> IO ()
 trip val = do
     let n = getSize val
     arr <- newBytes n
@@ -390,13 +390,18 @@ trip val = do
     -- So that the compiler does not optimize it out
 
     if (val1 /= val)
-    then error "roundtrip: no match"
+    then do
+        putStrLn "-----------------------------------------------------"
+        writeFile "val.hs" (show val)
+        putStrLn "-----------------------------------------------------"
+        writeFile "val1.hs" (show val1)
+        error "roundtrip: no match"
     else return ()
 
     return ()
 
 {-# INLINE roundtrip #-}
-roundtrip :: (Eq a, SERIALIZE_CLASS a) => a -> Int -> IO ()
+roundtrip :: (Show a, Eq a, SERIALIZE_CLASS a) => a -> Int -> IO ()
 roundtrip val times = loop times trip val
 
 -------------------------------------------------------------------------------
@@ -458,7 +463,7 @@ peekTimesStore n val times = do
 -}
 
 {-# INLINE tripStore #-}
-tripStore :: forall a. (Eq a, Store a) => a -> IO ()
+tripStore :: forall a. (Show a, Eq a, Store a) => a -> IO ()
 tripStore val = do
     let bs = Store.encode val
     let val1 =
@@ -469,13 +474,18 @@ tripStore val = do
     -- So that the compiler does not optimize it out
 
     if (val1 /= val)
-    then error "roundtrip: no match"
+    then do
+        putStrLn "-----------------------------------------------------"
+        writeFile "val.hs" (show val)
+        putStrLn "-----------------------------------------------------"
+        writeFile "val1.hs" (show val1)
+        error "roundtrip: no match"
     else return ()
 
     return ()
 
 {-# INLINE roundtripStore #-}
-roundtripStore :: (Eq a, Store a) => a -> Int -> IO ()
+roundtripStore :: (Show a, Eq a, Store a) => a -> Int -> IO ()
 roundtripStore val times = loop times tripStore val
 
 -------------------------------------------------------------------------------
@@ -905,7 +915,7 @@ instance Arbitrary Transaction where
 {-# INLINE benchConst #-}
 benchConst ::
        String
-    -> (forall a. (Eq a, SERIALIZE_CLASS a, Store a) => Int -> a -> Int -> IO ())
+    -> (forall a. (Eq a, SERIALIZE_CLASS a, Store a, Show a) => Int -> a -> Int -> IO ())
     -> Int
     -> Benchmark
 benchConst gname f times =
@@ -933,7 +943,7 @@ benchConst gname f times =
 {-# INLINE benchVar #-}
 benchVar ::
        String
-    -> (forall a. (Eq a, SERIALIZE_CLASS a, Store a) => Int -> a -> Int -> IO ())
+    -> (forall a. (Eq a, SERIALIZE_CLASS a, Store a, Show a) => Int -> a -> Int -> IO ())
     -> BinTree Int
     -> [Int]
     -> Int
@@ -949,7 +959,7 @@ benchVar gname f tInt lInt times =
 {-# INLINE benchTransaction #-}
 benchTransaction ::
        String
-    -> (forall a. (Eq a, SERIALIZE_CLASS a, Store a) => Int -> a -> Int -> IO ())
+    -> (forall a. (Eq a, SERIALIZE_CLASS a, Store a, Show a) => Int -> a -> Int -> IO ())
     -> Transaction
     -> Int
     -> Benchmark
@@ -1014,6 +1024,7 @@ main = do
 
 
     !(transaction :: Transaction) <- generate arbitrary
+    writeFile "base.hs" (show transaction)
     -- print transaction
     -- undefined
 #endif
