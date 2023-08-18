@@ -257,7 +257,9 @@ instance Serialize (BinTree a)
 #else
 $(deriveSerialize ''BinTree)
 #endif
-$(makeStore ''BinTree)
+-- Template haskell derivation of BinTree causes an infinite loop I believe.
+-- $(makeStore ''BinTree)
+instance Store a => Store (BinTree a)
 
 instance NFData a => NFData (BinTree a) where
   rnf (Leaf a) = rnf a `seq` ()
