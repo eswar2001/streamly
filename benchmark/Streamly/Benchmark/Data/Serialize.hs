@@ -1,6 +1,17 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE DuplicateRecordFields #-}
 
+{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE CPP #-}
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE MagicHash #-}
+{-# LANGUAGE ParallelListComp #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
+
 #undef FUSION_CHECK
 #ifdef FUSION_CHECK
 {-# OPTIONS_GHC -ddump-simpl -ddump-to-file -dsuppress-all #-}
@@ -86,7 +97,7 @@ import qualified Data.Store as Store
 
 import qualified Streamly.Internal.Data.Serialize.RecordTH as RecordTH
 
-import qualified Data.Store.TH.JInternal as JInternal
+import qualified Streamly.Internal.Data.Serialize.JInternal as JInternal
 
 
 -------------------------------------------------------------------------------
