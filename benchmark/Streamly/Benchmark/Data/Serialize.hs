@@ -80,6 +80,10 @@ import Data.Proxy (Proxy(..))
 
 import Data.Fixed
 
+import Data.Store.TH
+import Data.Store (Store)
+import qualified Data.Store as Store
+
 -------------------------------------------------------------------------------
 -- Types
 -------------------------------------------------------------------------------
@@ -92,6 +96,8 @@ instance SERIALIZE_CLASS Unit
 #else
 $(DERIVE_CLASS ''Unit)
 #endif
+-- $(makeStore ''Unit)
+instance Store Unit
 
 data Sum2
     = Sum21
@@ -103,6 +109,7 @@ instance SERIALIZE_CLASS Sum2
 #else
 $(DERIVE_CLASS ''Sum2)
 #endif
+$(makeStore ''Sum2)
 
 data Sum25
     = Sum251
@@ -137,6 +144,7 @@ instance SERIALIZE_CLASS Sum25
 #else
 $(DERIVE_CLASS ''Sum25)
 #endif
+$(makeStore ''Sum25)
 
 data Product25
     = Product25
@@ -172,6 +180,7 @@ instance SERIALIZE_CLASS Product25
 #else
 $(DERIVE_CLASS ''Product25)
 #endif
+$(makeStore ''Product25)
 
 -- XXX derived Eq instance is not inlined
 instance Eq Product25 where
@@ -220,6 +229,7 @@ instance SERIALIZE_CLASS CustomDT1
 #else
 $(DERIVE_CLASS ''CustomDT1)
 #endif
+$(makeStore ''CustomDT1)
 
 -------------------------------------------------------------------------------
 -- Recursive ADT
@@ -238,6 +248,7 @@ instance Serialize (BinTree a)
 #else
 $(deriveSerialize ''BinTree)
 #endif
+$(makeStore ''BinTree)
 
 instance NFData a => NFData (BinTree a) where
   rnf (Leaf a) = rnf a `seq` ()
@@ -389,6 +400,85 @@ roundtrip :: (Eq a, SERIALIZE_CLASS a) => a -> Int -> IO ()
 roundtrip val times = loop times trip val
 
 -------------------------------------------------------------------------------
+-- Store Helpers
+-------------------------------------------------------------------------------
+
+{-
+{-# INLINE pokeWithSizeStore #-}
+pokeWithSizeStore :: SERIALIZE_CLASS a => MutableByteArray -> a -> IO ()
+pokeWithSizeStore arr val = do
+    let n = getSize val
+    n `seq` SERIALIZE_OP 0 arr val >> return ()
+
+{-# INLINE pokeTimesWithSizeStore #-}
+pokeTimesWithSizeStore :: SERIALIZE_CLASS a => a -> Int -> IO ()
+pokeTimesWithSizeStore val times = do
+    let n = getSize val
+    arr <- newBytes n
+    loopWith times pokeWithSize arr val
+
+{-# INLINE pokeStore #-}
+pokeStore :: SERIALIZE_CLASS a => MutableByteArray -> a -> IO ()
+pokeStore arr val = SERIALIZE_OP 0 arr val >> return ()
+
+{-# INLINE pokeTimesStore #-}
+pokeTimesStore :: SERIALIZE_CLASS a => a -> Int -> IO ()
+pokeTimesStore val times = do
+    let n = getSize val
+    arr <- newBytes n
+    loopWith times poke arr val
+
+{-# INLINE peekStore #-}
+peekStore :: forall a. (Eq a, SERIALIZE_CLASS a) => a -> MutableByteArray -> IO ()
+peekStore val arr = do
+#ifdef USE_UNBOX
+        (val1 :: a)
+#else
+        (_, val1 :: a)
+#endif
+            <- DESERIALIZE_OP 0 arr
+        -- XXX We assert in trip but we don't assert here?
+        -- Ensure that we are actually constructing the type and using it.
+        -- Otherwise we may just read the values and discard them.
+        -- The comparison adds to the cost though.
+        --
+        {-
+        if (val1 /= val)
+        then error "peek: no match"
+        else return ()
+        -}
+        return ()
+
+{-# INLINE peekTimesStore #-}
+peekTimesStore :: (Eq a, SERIALIZE_CLASS a) => Int -> a -> Int -> IO ()
+peekTimesStore n val times = do
+    arr <- newBytes n
+    _ <- SERIALIZE_OP 0 arr val
+    loopWith times peek val arr
+-}
+
+{-# INLINE tripStore #-}
+tripStore :: forall a. (Eq a, Store a) => a -> IO ()
+tripStore val = do
+    let bs = Store.encode val
+    let val1 =
+            case Store.decode bs of
+               Left _ -> undefined
+               Right res -> res
+    assert (val == val1) (pure ())
+    -- So that the compiler does not optimize it out
+    {-
+    if (val1 /= val)
+    then error "roundtrip: no match"
+    else return ()
+    -}
+    return ()
+
+{-# INLINE roundtripStore #-}
+roundtripStore :: (Eq a, Store a) => a -> Int -> IO ()
+roundtripStore val times = loop times tripStore val
+
+-------------------------------------------------------------------------------
 -- Record
 -------------------------------------------------------------------------------
 
@@ -494,6 +584,7 @@ instance Arbitrary TransactionMode where
     arbitrary = elements [IFSC, UPI]
 
 $(deriveSerialize ''TransactionMode)
+$(makeStore ''TransactionMode)
 
 data TransactionType
     = PAY
@@ -504,6 +595,7 @@ instance Arbitrary TransactionType where
     arbitrary = elements [PAY, COLLECT]
 
 $(deriveSerialize ''TransactionType)
+$(makeStore ''TransactionType)
 
 data TransactionStatus
     = SUCCESS
@@ -536,6 +628,7 @@ instance Arbitrary TransactionStatus where
             ]
 
 $(deriveSerialize ''TransactionStatus)
+$(makeStore ''TransactionStatus)
 
 data TransactionChannel
     = USSD
@@ -548,6 +641,7 @@ instance Arbitrary TransactionChannel where
     arbitrary = elements [USSD, ANDROID, IOS, SDK]
 
 $(deriveSerialize ''TransactionChannel)
+$(makeStore ''TransactionChannel)
 
 data TransactionCallbackStatus
     = CALLBACK_SUCCESS
@@ -568,6 +662,7 @@ instance Arbitrary TransactionCallbackStatus where
             ]
 
 $(deriveSerialize ''TransactionCallbackStatus)
+$(makeStore ''TransactionCallbackStatus)
 
 data CollectType
     = TRANSACTION
@@ -578,6 +673,7 @@ instance Arbitrary CollectType where
     arbitrary = elements [TRANSACTION, MANDATE]
 
 $(deriveSerialize ''CollectType)
+$(makeStore ''CollectType)
 
 -- add more fields if required to PayerInfo
 data PayerInfo  =
@@ -600,6 +696,7 @@ data PayerInfo  =
     } deriving (Show, Eq, Generic, Ord)
 
 $(deriveSerialize ''PayerInfo)
+$(makeStore ''PayerInfo)
 
 instance Arbitrary PayerInfo where
     arbitrary =
@@ -634,6 +731,7 @@ data PayeeInfo  =
     } deriving (Show, Eq, Generic, Ord)
 
 $(deriveSerialize ''PayeeInfo)
+$(makeStore ''PayeeInfo)
 
 instance Arbitrary PayeeInfo where
     arbitrary =
@@ -673,6 +771,7 @@ instance Arbitrary NpciResponse where
         arbitrary
 
 $(deriveSerialize ''NpciResponse)
+$(makeStore ''NpciResponse)
 
 -- add more fields if required to TxnInfo
 data TxnInfo  =
@@ -702,6 +801,7 @@ data TxnInfo  =
     } deriving (Show, Eq, Generic, Ord)
 
 $(deriveSerialize ''TxnInfo)
+$(makeStore ''TxnInfo)
 
 instance Arbitrary TxnInfo where
     arbitrary =
@@ -760,6 +860,7 @@ data Transaction  = Transaction
   } deriving (Generic, Show, Eq)
 
 $(deriveSerialize ''Transaction)
+$(makeStore ''Transaction)
 
 instance Arbitrary Transaction where
     arbitrary =
@@ -800,10 +901,11 @@ instance Arbitrary Transaction where
 -- Benchmarks
 -------------------------------------------------------------------------------
 
+-- XXX Why forall?
 {-# INLINE benchConst #-}
 benchConst ::
        String
-    -> (forall a. (Eq a, SERIALIZE_CLASS a) => Int -> a -> Int -> IO ())
+    -> (forall a. (Eq a, SERIALIZE_CLASS a, Store a) => Int -> a -> Int -> IO ())
     -> Int
     -> Benchmark
 benchConst gname f times =
@@ -831,7 +933,7 @@ benchConst gname f times =
 {-# INLINE benchVar #-}
 benchVar ::
        String
-    -> (forall a. (Eq a, SERIALIZE_CLASS a) => Int -> a -> Int -> IO ())
+    -> (forall a. (Eq a, SERIALIZE_CLASS a, Store a) => Int -> a -> Int -> IO ())
     -> BinTree Int
     -> [Int]
     -> Int
@@ -847,7 +949,7 @@ benchVar gname f tInt lInt times =
 {-# INLINE benchTransaction #-}
 benchTransaction ::
        String
-    -> (forall a. (Eq a, SERIALIZE_CLASS a) => Int -> a -> Int -> IO ())
+    -> (forall a. (Eq a, SERIALIZE_CLASS a, Store a) => Int -> a -> Int -> IO ())
     -> Transaction
     -> Int
     -> Benchmark
@@ -877,6 +979,7 @@ allBenchmarks tInt lInt transaction times =
     , benchConst "pokeWithSize" (const pokeTimesWithSize) times
     , benchConst "peek" peekTimes times
     , benchConst "roundtrip" (const roundtrip) times
+    , benchConst "roundtripStore" (const roundtripStore) times
 #ifndef USE_UNBOX
     , benchVar "poke" (const pokeTimes) tInt lInt 1
     , benchVar "pokeWithSize" (const pokeTimesWithSize) tInt lInt 1
@@ -886,6 +989,9 @@ allBenchmarks tInt lInt transaction times =
     , benchTransaction "pokeWithSize" (const pokeTimesWithSize) transaction (times `div` 25)
     , benchTransaction "peek" peekTimes transaction (times `div` 25)
     , benchTransaction "roundtrip" (const roundtrip) transaction (times `div` 25)
+    , benchVar "roundtripStore" (const roundtripStore) tInt lInt 1
+    , benchTransaction "roundtripStore" (const roundtripStore) transaction (times `div` 25)
+
 #endif
     ]
 
