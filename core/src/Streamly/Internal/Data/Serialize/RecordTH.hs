@@ -21,7 +21,7 @@ module Streamly.Internal.Data.Serialize.RecordTH
 --------------------------------------------------------------------------------
 
 import Control.Monad (void)
-import Data.List (sortBy)
+import Data.List (foldl', sortBy)
 import Data.Maybe (fromJust, fromMaybe)
 import Data.Word (Word32, Word8)
 import Data.Char (ord)
@@ -77,6 +77,9 @@ n_finalOff = mkName "finalOff"
 n_tagArr :: Name
 n_tagArr = mkName "tagArr"
 
+n_acc :: Name
+n_acc = mkName "acc"
+
 --------------------------------------------------------------------------------
 -- Domain specific helpers
 --------------------------------------------------------------------------------
@@ -112,22 +115,22 @@ isMaybeType :: Type -> Bool
 isMaybeType (AppT (ConT m) _) = m == ''Maybe
 isMaybeType _ = False
 
-exprGetSize :: Int -> Field -> Q Exp
-exprGetSize _ (Nothing, _) = error "Cant use non-tagged value"
-exprGetSize i (Just tag, ty) = do
+exprGetSize :: Q Exp -> (Int, Field) -> Q Exp
+exprGetSize _ (_, (Nothing, _)) = error "Cant use non-tagged value"
+exprGetSize acc (i, (Just tag, ty)) =
     let lenTag = length (nameBase tag)
         common = 1 + lenTag + 4
         commonExp = litIntegral common
-    if isMaybeType ty
-        then [|case $(varE (mkFieldName i)) of
-                   Nothing -> 0
-                   Just x ->
-                       case size of
-                           Size f -> $(commonExp) + f x|]
-        else [|case $(varE (mkFieldName i)) of
-                   x ->
-                       case size of
-                           Size f -> $(commonExp) + f x|]
+     in if isMaybeType ty
+            then [|case $(varE (mkFieldName i)) of
+                       Nothing -> $(acc)
+                       Just x ->
+                           case size of
+                               Size f -> f $(acc) x + $(commonExp)|]
+            else [|case $(varE (mkFieldName i)) of
+                       x ->
+                           case size of
+                               Size f -> f $(acc) x + $(commonExp)|]
 
 --------------------------------------------------------------------------------
 -- Size
@@ -139,35 +142,30 @@ isUnitType _ = False
 
 mkSizeOfExpr :: Type -> [DataCon] -> Q Exp
 mkSizeOfExpr headTy constructors =
-    case constructors of
+    case constructors
         -- One constructor with no fields is a unit type. Size of a unit type is
         -- 1.
-        [constructor@(DataCon _ _ _ fields@(_:_))] ->
-            case fields of
-                _ ->
-                    appE
-                        (conE 'Size)
-                        (lamE
-                             [varP n_x]
-                             (caseE (varE n_x) [matchCons constructor]))
-        _ -> error
-                 $ unlines
-                       [ "The datatype should have exatcly 1 constructor."
-                       , "It has " ++ lenConsStr ++ "."
-                       , "See " ++ headTyStr
-                       ]
-
-    where
+          of
+        [constructor@(DataCon _ _ _ (_:_))] ->
+            appE
+                (conE 'Size)
+                (lamE
+                     [varP n_acc, varP n_x]
+                     (caseE (varE n_x) [matchCons (varE n_acc) constructor]))
+        _ ->
+            error $
+            unlines
+                [ "The datatype should have exatcly 1 constructor."
+                , "It has " ++ lenConsStr ++ "."
+                , "See " ++ headTyStr
+                ]
+  where
     headTyStr = pprint headTy
     lenConsStr = show $ length constructors
-
-    sizeOfField (i, field) = exprGetSize i field
-
-    sizeOfFields fields =
-        [|4 + $(appE (varE 'sum) (listE (map sizeOfField (zip [0..] fields))))|]
-
-    matchCons (DataCon cname _ _ fields) =
-        matchConstructor cname (length fields) (sizeOfFields fields)
+    sizeOfFields acc fields =
+        [|4 + $(foldl' exprGetSize acc $ zip [0 ..] fields)|]
+    matchCons acc (DataCon cname _ _ fields) =
+        matchConstructor cname (length fields) (sizeOfFields acc fields)
 
 --------------------------------------------------------------------------------
 -- Peek
@@ -331,7 +329,7 @@ mkDeserializeExprOne (DataCon cname _ _ fields) =
             -- this always.
             ([|let $(varP n_tagArr) = $(tagBase) :: Array.Array Word8
                 in $(makeBindBody
-                         (1 :: Int)
+                         (0 :: Int)
                          (DeserializeBindingNames
                               { bnOffset = makeI i
                               , bnFinalOff = n_finalOff
