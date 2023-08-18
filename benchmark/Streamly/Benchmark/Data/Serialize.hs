@@ -67,7 +67,7 @@ import qualified Data.Text as T
 import qualified Data.Text.Array as TArr (Array(..))
 
 import Data.Text.Internal (Text(..))
-import Streamly.Internal.Data.Array.Type (Array(..))
+import Streamly.Internal.Data.Array (Array(..))
 import Streamly.Internal.Data.Unbox (MutableByteArray(..))
 import qualified Streamly.Internal.Data.Unbox as Unbox
 
@@ -78,6 +78,22 @@ import GHC.Int
 import Data.Proxy (Proxy(..))
 
 import Data.Fixed
+
+import Data.Word (Word8)
+
+import Data.Store.TH
+import Data.Store (Store, Poke(..))
+import Data.Store.Core
+    ( PeekException(..)
+    , Poke(..)
+    , PokeState
+    , unsafeMakePokeState
+    )
+import qualified Data.Store as Store
+import qualified Data.Store.Internal as Store
+
+import           Data.ByteString (ByteString)
+import qualified Data.ByteString.Internal as BS
 
 -------------------------------------------------------------------------------
 -- Types
@@ -91,6 +107,8 @@ instance SERIALIZE_CLASS Unit
 #else
 $(DERIVE_CLASS ''Unit)
 #endif
+-- $(makeStore ''Unit)
+instance Store Unit
 
 data Sum2
     = Sum21
@@ -102,6 +120,7 @@ instance SERIALIZE_CLASS Sum2
 #else
 $(DERIVE_CLASS ''Sum2)
 #endif
+$(makeStore ''Sum2)
 
 data Sum25
     = Sum251
@@ -136,6 +155,7 @@ instance SERIALIZE_CLASS Sum25
 #else
 $(DERIVE_CLASS ''Sum25)
 #endif
+$(makeStore ''Sum25)
 
 data Product25
     = Product25
@@ -171,6 +191,7 @@ instance SERIALIZE_CLASS Product25
 #else
 $(DERIVE_CLASS ''Product25)
 #endif
+$(makeStore ''Product25)
 
 -- XXX derived Eq instance is not inlined
 instance Eq Product25 where
@@ -219,6 +240,7 @@ instance SERIALIZE_CLASS CustomDT1
 #else
 $(DERIVE_CLASS ''CustomDT1)
 #endif
+$(makeStore ''CustomDT1)
 
 -------------------------------------------------------------------------------
 -- Recursive ADT
@@ -235,6 +257,7 @@ instance Serialize (BinTree a)
 #else
 $(deriveSerialize ''BinTree)
 #endif
+$(makeStore ''BinTree)
 
 instance NFData a => NFData (BinTree a) where
   rnf (Leaf a) = rnf a `seq` ()
@@ -353,7 +376,7 @@ peekTimes n val times = do
     loopWith times peek (val, n) arr
 
 {-# INLINE trip #-}
-trip :: forall a. (Eq a, SERIALIZE_CLASS a) => a -> IO ()
+trip :: forall a. (Show a, Eq a, SERIALIZE_CLASS a) => a -> IO ()
 trip val = do
     let n = getSize val
     arr <- newBytes n
@@ -365,12 +388,84 @@ trip val = do
 #endif
     -- Do not remove this, see the comments in peek.
     if (val1 /= val)
-    then error "roundtrip: no match"
+    then error "trip: no match"
     else return ()
 
 {-# INLINE roundtrip #-}
-roundtrip :: (Eq a, SERIALIZE_CLASS a) => a -> Int -> IO ()
+roundtrip :: (Show a, Eq a, SERIALIZE_CLASS a) => a -> Int -> IO ()
 roundtrip val times = loop times trip val
+
+-------------------------------------------------------------------------------
+-- Store Helpers
+-------------------------------------------------------------------------------
+
+{-# INLINE pokeWithSizeStore #-}
+pokeWithSizeStore :: forall a. Store a => PokeState -> a -> IO ()
+pokeWithSizeStore ps val = do
+    let n = Store.getSize val
+    n `seq` runPoke (Store.poke val) ps 0 >> return ()
+
+{-# INLINE pokeTimesWithSizeStore #-}
+pokeTimesWithSizeStore :: Store a => a -> Int -> IO ()
+pokeTimesWithSizeStore val times = do
+    let n = Store.getSize val
+    BS.create n $ \ptr -> do
+        ps <- unsafeMakePokeState ptr (pure ptr)
+        loopWith times pokeWithSizeStore ps val
+    pure ()
+
+{-# INLINE pokeStore #-}
+pokeStore :: Store a => PokeState -> a -> IO ()
+pokeStore ps val = do
+    runPoke (Store.poke val) ps 0 >> return ()
+
+{-# INLINE pokeTimesStore #-}
+pokeTimesStore :: Store a => a -> Int -> IO ()
+pokeTimesStore val times = do
+    let n = Store.getSize val
+    BS.create n $ \ptr -> do
+        ps <- unsafeMakePokeState ptr (pure ptr)
+        loopWith times pokeStore ps val
+    pure ()
+
+{-# INLINE peekStore #-}
+peekStore :: forall a. (Eq a, Store a) => a -> ByteString -> IO ()
+peekStore val arr = do
+        (val1 :: a) <- Store.decodeIO arr
+        -- XXX We assert in trip but we don't assert here?
+        -- Ensure that we are actually constructing the type and using it.
+        -- Otherwise we may just read the values and discard them.
+        -- The comparison adds to the cost though.
+        --
+        if (val1 /= val)
+        then error "peekStore: no match"
+        else return ()
+        return ()
+
+{-# INLINE peekTimesStore #-}
+peekTimesStore :: (Eq a, Store a) => Int -> a -> Int -> IO ()
+peekTimesStore n val times = do
+    arr <-
+        BS.create n $ \ptr -> do
+            ps <- unsafeMakePokeState ptr (pure ptr)
+            runPoke (Store.poke val) ps 0
+            return ()
+    loopWith times peekStore val arr
+
+{-# INLINE tripStore #-}
+tripStore :: forall a. (Show a, Eq a, Store a) => a -> IO ()
+tripStore val = do
+    let bs = Store.encode val
+    val1 <- Store.decodeIO bs
+    -- So that the compiler does not optimize it out
+    if (val1 /= val)
+        then error "tripStore: no match"
+        else return ()
+    return ()
+
+{-# INLINE roundtripStore #-}
+roundtripStore :: (Show a, Eq a, Store a) => a -> Int -> IO ()
+roundtripStore val times = loop times tripStore val
 
 -------------------------------------------------------------------------------
 -- Record
@@ -480,6 +575,7 @@ instance Arbitrary TransactionMode where
     arbitrary = elements [IFSC, UPI]
 
 $(deriveSerialize ''TransactionMode)
+$(makeStore ''TransactionMode)
 
 data TransactionType
     = PAY
@@ -490,6 +586,7 @@ instance Arbitrary TransactionType where
     arbitrary = elements [PAY, COLLECT]
 
 $(deriveSerialize ''TransactionType)
+$(makeStore ''TransactionType)
 
 data TransactionStatus
     = SUCCESS
@@ -522,6 +619,7 @@ instance Arbitrary TransactionStatus where
             ]
 
 $(deriveSerialize ''TransactionStatus)
+$(makeStore ''TransactionStatus)
 
 data TransactionChannel
     = USSD
@@ -534,6 +632,7 @@ instance Arbitrary TransactionChannel where
     arbitrary = elements [USSD, ANDROID, IOS, SDK]
 
 $(deriveSerialize ''TransactionChannel)
+$(makeStore ''TransactionChannel)
 
 data TransactionCallbackStatus
     = CALLBACK_SUCCESS
@@ -554,6 +653,7 @@ instance Arbitrary TransactionCallbackStatus where
             ]
 
 $(deriveSerialize ''TransactionCallbackStatus)
+$(makeStore ''TransactionCallbackStatus)
 
 data CollectType
     = TRANSACTION
@@ -564,6 +664,7 @@ instance Arbitrary CollectType where
     arbitrary = elements [TRANSACTION, MANDATE]
 
 $(deriveSerialize ''CollectType)
+$(makeStore ''CollectType)
 
 -- add more fields if required to PayerInfo
 data PayerInfo  =
@@ -586,6 +687,7 @@ data PayerInfo  =
     } deriving (Show, Eq, Generic, Ord)
 
 $(deriveSerialize ''PayerInfo)
+$(makeStore ''PayerInfo)
 
 instance Arbitrary PayerInfo where
     arbitrary =
@@ -620,6 +722,7 @@ data PayeeInfo  =
     } deriving (Show, Eq, Generic, Ord)
 
 $(deriveSerialize ''PayeeInfo)
+$(makeStore ''PayeeInfo)
 
 instance Arbitrary PayeeInfo where
     arbitrary =
@@ -659,6 +762,7 @@ instance Arbitrary NpciResponse where
         arbitrary
 
 $(deriveSerialize ''NpciResponse)
+$(makeStore ''NpciResponse)
 
 -- add more fields if required to TxnInfo
 data TxnInfo  =
@@ -688,6 +792,7 @@ data TxnInfo  =
     } deriving (Show, Eq, Generic, Ord)
 
 $(deriveSerialize ''TxnInfo)
+$(makeStore ''TxnInfo)
 
 instance Arbitrary TxnInfo where
     arbitrary =
@@ -746,6 +851,7 @@ data Transaction  = Transaction
   } deriving (Generic, Show, Eq)
 
 $(deriveSerialize ''Transaction)
+$(makeStore ''Transaction)
 
 instance Arbitrary Transaction where
     arbitrary =
@@ -786,30 +892,32 @@ instance Arbitrary Transaction where
 -- Benchmarks
 -------------------------------------------------------------------------------
 
+-- XXX Why forall?
 {-# INLINE benchConst #-}
 benchConst ::
        String
-    -> (forall a. (Eq a, SERIALIZE_CLASS a) => Int -> a -> Int -> IO ())
+    -> (forall a. (Eq a, SERIALIZE_CLASS a, Store a, Show a) => a -> Int)
+    -> (forall a. (Eq a, SERIALIZE_CLASS a, Store a, Show a) => Int -> a -> Int -> IO ())
     -> Int
     -> Benchmark
-benchConst gname f times =
+benchConst gname gtSize f times =
     bgroup gname
-       [ let !n = getSize Unit
+       [ let !n = gtSize Unit
           in benchSink "Unit" times (f n Unit)
-       , let !n = getSize CDT1C1
+       , let !n = gtSize CDT1C1
           in benchSink "C1" times (f n CDT1C1)
        , let val = CDT1C2 5
-             !n = getSize val
+             !n = gtSize val
           in benchSink "C2" (times `div` 2) (f n val)
        , let val = CDT1C3 5 2
-             !n = getSize val
+             !n = gtSize val
           in benchSink "C3" (times `div` 3) (f n val)
-       , let !n = getSize Sum21
+       , let !n = gtSize Sum21
           in benchSink "Sum2" times (f n Sum21)
-       , let !n = getSize Sum2525
+       , let !n = gtSize Sum2525
           in benchSink "Sum25" times (f n Sum2525)
        , let val = Product25 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25
-             !n = getSize val
+             !n = gtSize val
           in benchSink "Product25" (times `div` 26) (f n val)
         ]
 
@@ -817,29 +925,31 @@ benchConst gname f times =
 {-# INLINE benchVar #-}
 benchVar ::
        String
-    -> (forall a. (Eq a, SERIALIZE_CLASS a) => Int -> a -> Int -> IO ())
+    -> (forall a. (Eq a, SERIALIZE_CLASS a, Store a, Show a) => a -> Int)
+    -> (forall a. (Eq a, SERIALIZE_CLASS a, Store a, Show a) => Int -> a -> Int -> IO ())
     -> BinTree Int
     -> [Int]
     -> Int
     -> Benchmark
-benchVar gname f tInt lInt times =
+benchVar gname gtSize f tInt lInt times =
     bgroup gname
-       [ let !n = getSize tInt
+       [ let !n = gtSize tInt
            in benchSink "bintree-int" times (f n tInt)
-        , let !n = getSize lInt
+        , let !n = gtSize lInt
            in benchSink "list-int" times (f n lInt)
         ]
 
 {-# INLINE benchTransaction #-}
 benchTransaction ::
        String
-    -> (forall a. (Eq a, SERIALIZE_CLASS a) => Int -> a -> Int -> IO ())
+    -> (forall a. (Eq a, SERIALIZE_CLASS a, Store a, Show a) => a -> Int)
+    -> (forall a. (Eq a, SERIALIZE_CLASS a, Store a, Show a) => Int -> a -> Int -> IO ())
     -> Transaction
     -> Int
     -> Benchmark
-benchTransaction gname f transaction times =
+benchTransaction gname gtSize f transaction times =
     bgroup gname
-        [ let !n = getSize transaction
+        [ let !n = gtSize transaction
            in benchSink "Transaction" times (f n transaction)
         ]
 #endif
@@ -859,19 +969,33 @@ allBenchmarks tInt lInt transaction times =
         , bench "list-int" $ nf getSize lInt
 #endif
         ]
-    , benchConst "poke" (const pokeTimes) times
-    , benchConst "pokeWithSize" (const pokeTimesWithSize) times
-    , benchConst "peek" peekTimes times
-    , benchConst "roundtrip" (const roundtrip) times
+
+    , benchConst "poke" getSize (const pokeTimes) times
+    , benchConst "pokeStore" Store.getSize (const pokeTimesStore) times
+    , benchConst "pokeWithSize" getSize (const pokeTimesWithSize) times
+    , benchConst "pokeWithSizeStore" Store.getSize (const pokeTimesWithSizeStore) times
+    , benchConst "peek" getSize peekTimes times
+    , benchConst "peekStore" Store.getSize peekTimesStore times
+    , benchConst "roundtrip" getSize (const roundtrip) times
+    , benchConst "roundtripStore" Store.getSize (const roundtripStore) times
 #ifndef USE_UNBOX
-    , benchVar "poke" (const pokeTimes) tInt lInt 1
-    , benchVar "pokeWithSize" (const pokeTimesWithSize) tInt lInt 1
-    , benchVar "peek" peekTimes tInt lInt 1
-    , benchVar "roundtrip" (const roundtrip) tInt lInt 1
-    , benchTransaction "poke" (const pokeTimes) transaction (times `div` 25)
-    , benchTransaction "pokeWithSize" (const pokeTimesWithSize) transaction (times `div` 25)
-    , benchTransaction "peek" peekTimes transaction (times `div` 25)
-    , benchTransaction "roundtrip" (const roundtrip) transaction (times `div` 25)
+    , benchVar "poke" getSize (const pokeTimes) tInt lInt 1
+    , benchVar "pokeStore" Store.getSize (const pokeTimesStore) tInt lInt 1
+    , benchVar "pokeWithSize" getSize (const pokeTimesWithSize) tInt lInt 1
+    , benchVar "pokeWithSizeStore" Store.getSize (const pokeTimesWithSizeStore) tInt lInt 1
+    , benchVar "peek" getSize peekTimes tInt lInt 1
+    , benchVar "peekStore" Store.getSize peekTimesStore tInt lInt 1
+    , benchVar "roundtrip" getSize (const roundtrip) tInt lInt 1
+    , benchVar "roundtripStore" Store.getSize (const roundtripStore) tInt lInt 1
+    , benchTransaction "poke" getSize (const pokeTimes) transaction (times `div` 25)
+    , benchTransaction "pokeStore" Store.getSize (const pokeTimesStore) transaction (times `div` 25)
+    , benchTransaction "pokeWithSize" getSize (const pokeTimesWithSize) transaction (times `div` 25)
+    , benchTransaction "pokeWithSizeStore" Store.getSize (const pokeTimesWithSizeStore) transaction (times `div` 25)
+    , benchTransaction "peek" getSize peekTimes transaction (times `div` 25)
+    , benchTransaction "peekStore" Store.getSize peekTimesStore transaction (times `div` 25)
+    , benchTransaction "roundtrip" getSize (const roundtrip) transaction (times `div` 25)
+    , benchTransaction "roundtripStore" Store.getSize (const roundtripStore) transaction (times `div` 25)
+
 #endif
     ]
 
