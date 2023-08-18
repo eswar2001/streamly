@@ -225,6 +225,7 @@ instance forall a. Serialize a => Serialize [a] where
               pokeList o1 xs
         pokeList off1 val
 
+-- XXX Should we even have this?
 instance Serialize MutableByteArray where
     {-# INLINE size #-}
     size =
@@ -234,7 +235,7 @@ instance Serialize MutableByteArray where
 
     {-# INLINE deserialize #-}
     deserialize off arr = do
-        (byteLen, off1) <- deserialize off arr :: IO (Int, Int)
+        (off1, byteLen) <- deserialize off arr :: IO (Int, Int)
         let off2 = off1 + byteLen
         let slice = MutArray.MutArray arr off1 off2 off2
         newArr <- MutArray.clone slice
@@ -250,13 +251,13 @@ instance Serialize MutableByteArray where
         MutArray.putSliceUnsafe arrayed 0 dst off1 arrLen
         pure (off1 + arrLen)
 
-instance Serialize (Array a) where
+instance forall a. (Unbox a, Show a) => Serialize (Array a) where
     {-# INLINE size #-}
     size = Size $ \i (Array {..}) -> i + (arrEnd - arrStart) + 8
 
     {-# INLINE deserialize #-}
     deserialize off arr = do
-        (byteLen, off1) <- deserialize off arr :: IO (Int, Int)
+        (off1, byteLen) <- deserialize off arr :: IO (Int, Int)
         let off2 = off1 + byteLen
         let slice = MutArray.MutArray arr off1 off2 off2
         newArr <- MutArray.clone slice
