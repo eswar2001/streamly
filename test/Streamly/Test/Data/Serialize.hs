@@ -20,6 +20,7 @@ import Streamly.Test.Data.Serialize.TH (genDatatype)
 import Streamly.Internal.Data.Serialize.TH (deriveSerialize)
 
 import qualified Streamly.Internal.Data.Serialize as Serialize
+import qualified Streamly.Internal.Data.Array as Array
 
 import Test.Hspec.QuickCheck
 import Test.QuickCheck
@@ -111,6 +112,15 @@ testCases = do
 
     limitQC
         $ prop "BinTree" $ \(x :: BinTree Int) -> roundtrip x
+
+    limitQC
+        $ prop "Array Int" $ \(x :: [Int]) -> roundtrip (Array.fromList x)
+
+{-
+    limitQC
+        $ prop "Array Int"
+        $ \(x :: [Int]) -> roundtrip (Array.arrContents (Array.fromList x))
+-}
 
     where
 
