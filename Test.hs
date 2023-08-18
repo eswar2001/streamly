@@ -23,7 +23,8 @@ import Streamly.Internal.Data.Unbox
     , PinnedState(..)
     , Unbox(..)
     )
-
+{-
+{-
 
 data RecordDT0 =
     RecordDT0
@@ -33,8 +34,8 @@ data RecordDT0 =
 
 $(deriveSerialize ''RecordDT0)
 $(makeJStore ''RecordDT0)
+-}
 
-{-
 {-
 
 data Transaction =
@@ -196,10 +197,71 @@ test2 = do
     print (decode encoded :: Either PeekException RecordDT5)
 
     pure ()
+-}
+
+
+{-
+data RecordDT1 =
+    RecordDT1
+        { field0 :: Maybe Int
+        , field2 :: Maybe Char
+        , field4 :: Maybe Double
+        , field6 :: Maybe Bool
+        }
+    deriving (Eq, Show)
+
+record = RecordDT1 (Just 3) (Just 'c') (Just 5.5) (Just True)
+-}
+
+data RecordDT1 =
+    RecordDT2
+        { field0 :: Maybe Int
+        , field2 :: Maybe Char
+        }
+    deriving (Eq, Show)
+
+{-
+data RecordDT1 =
+    RecordDT1
+        { field0 :: Maybe Int
+        , field4 :: Maybe Double
+        }
+    deriving (Eq, Show)
+
+data RecordDT1 =
+    RecordDT1
+        { field4 :: Maybe Double
+        , field6 :: Maybe Bool
+        }
+    deriving (Eq, Show)
+
+data RecordDT1 =
+    RecordDT1
+        { fld0 :: Maybe Float
+        , fld1 :: Maybe Float
+        , field0 :: Maybe Int
+        , field1 :: Maybe Float
+        , field2 :: Maybe Char
+        , field3 :: Maybe Float
+        , field4 :: Maybe Double
+        , field5 :: Maybe Float
+        , field6 :: Maybe Bool
+        , field7 :: Maybe Float
+        , field8 :: Maybe Float
+        }
+    deriving (Eq, Show)
+-}
+
+$(makeJStore ''RecordDT1)
+
+test2 = do
+    -- let encoded = encode record
+    -- writeFile "encoded.bs" (show encoded)
+
+    encoded1 <- read <$> readFile "encoded.bs"
+    print (decode encoded1 :: Either PeekException RecordDT1)
 
 main :: IO ()
 main = test2
 
--}
-
-main = putStrLn "Hi"
+-- main = putStrLn "Hi"
