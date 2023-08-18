@@ -980,28 +980,34 @@ allBenchmarks times =
 allBenchmarks :: BinTree Int -> [Int] -> Transaction -> Int -> [Benchmark]
 allBenchmarks tInt lInt transaction times =
 #endif
-    [ bgroup "sizeOf"
+    [ {- bgroup "sizeOf"
         [
 #ifndef USE_UNBOX
           bench "bintree-int" $ nf sizeOfOnce tInt
         , bench "list-int" $ nf sizeOfOnce lInt
 #endif
         ]
+
     , benchConst "poke" (const pokeTimes) times
     , benchConst "pokeWithSize" (const pokeTimesWithSize) times
     , benchConst "peek" peekTimes times
-    , benchConst "roundtrip" (const roundtrip) times
+-}
+     benchConst "roundtrip" (const roundtrip) times
     , benchConst "roundtripStore" (const roundtripStore) times
 #ifndef USE_UNBOX
+{-
     , benchVar "poke" (const pokeTimes) tInt lInt 1
     , benchVar "pokeWithSize" (const pokeTimesWithSize) tInt lInt 1
     , benchVar "peek" peekTimes tInt lInt 1
+-}
     , benchVar "roundtrip" (const roundtrip) tInt lInt 1
+    , benchVar "roundtripStore" (const roundtripStore) tInt lInt 1
+{-
     , benchTransaction "poke" (const pokeTimes) transaction (times `div` 25)
     , benchTransaction "pokeWithSize" (const pokeTimesWithSize) transaction (times `div` 25)
     , benchTransaction "peek" peekTimes transaction (times `div` 25)
+-}
     , benchTransaction "roundtrip" (const roundtrip) transaction (times `div` 25)
-    , benchVar "roundtripStore" (const roundtripStore) tInt lInt 1
     , benchTransaction "roundtripStore" (const roundtripStore) transaction (times `div` 25)
 
 #endif
