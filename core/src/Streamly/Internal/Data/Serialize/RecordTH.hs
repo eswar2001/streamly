@@ -20,11 +20,13 @@ module Streamly.Internal.Data.Serialize.RecordTH
 -- Imports
 --------------------------------------------------------------------------------
 
+import GHC.Ptr (Ptr(..))
 import Control.Monad (void)
-import Data.List (foldl', sortBy)
+import Data.List (sortBy)
 import Data.Maybe (fromJust, fromMaybe)
 import Data.Word (Word32, Word8)
-import Data.Char (ord)
+import Data.Char (ord, chr)
+import Streamly.Internal.Data.MutArray.Type (memcmp1)
 
 import Language.Haskell.TH
 import Streamly.Internal.Data.Serialize
@@ -177,58 +179,61 @@ w32ToInt = fromIntegral
 
 skipFieldRF ::
        Serialize a
-    => Array.Array Word8
+    => Ptr Word8
+    -> Int
     -> Int
     -> Int
     -> MutableByteArray
     -> IO (Int, Maybe a)
-skipFieldRF tagVal finalOff afterTagOff arr = do
+skipFieldRF tagVal tagLen finalOff afterTagOff arr = do
     let nextFieldOffOff = afterTagOff
     (_, nextFieldOff) <- deserialize nextFieldOffOff arr
-    deserializeRF tagVal finalOff (w32ToInt nextFieldOff) arr
+    deserializeRF tagVal tagLen finalOff (w32ToInt nextFieldOff) arr
 
 checkTagRF ::
        Serialize a
-    => Array.Array Word8
+    => Ptr Word8
     -> Int
     -> Int
-    -> Word8
+    -> Int
     -> Int
     -> MutableByteArray
     -> IO (Int, Maybe a)
-checkTagRF tagVal finalOff backOff tagLen tagOff arr =
-    case compare slice tagVal of
+checkTagRF tagVal tagLen finalOff backOff tagOff arr = do
+    res <- Array.asPtrUnsafe slice $ \ptr -> memcmp1 ptr tagVal tagLen
+    case res of
         EQ ->
             let newOff = afterTagOff + 4
              in fmap Just <$> deserialize newOff arr
         GT -> pure (backOff, Nothing)
-        LT -> skipFieldRF tagVal finalOff afterTagOff arr
+        LT -> skipFieldRF tagVal tagLen finalOff afterTagOff arr
   where
-    afterTagOff = fromIntegral tagLen + tagOff
+    afterTagOff = tagLen + tagOff
     slice = Array.Array arr tagOff afterTagOff
 
 deserializeRF ::
        Serialize a
-    => Array.Array Word8
+    => Ptr Word8
+    -> Int
     -> Int
     -> Int
     -> MutableByteArray
     -> IO (Int, Maybe a)
-deserializeRF tagVal finalOff off arr =
+deserializeRF tagVal tagLen finalOff off arr =
     if off >= finalOff
         then pure (off, Nothing)
         else do
-            (tagOff, tagLen) <- deserialize off arr
-            case tagLen :: Word8 of
+            (tagOff, curTagLen) <- deserialize off arr
+            case curTagLen :: Word8 of
                 x
-                    | x == lenTagVal ->
-                        checkTagRF tagVal finalOff off tagLen tagOff arr
-                    | x > lenTagVal -> pure (off, Nothing)
+                    | x == tagLenW8 ->
+                        checkTagRF tagVal tagLen finalOff off tagOff arr
+                    | x > tagLenW8 -> pure (off, Nothing)
                     | otherwise ->
-                        let afterTagOff = fromIntegral tagLen + tagOff
-                         in skipFieldRF tagVal finalOff afterTagOff arr
-  where
-    lenTagVal = fromIntegral (Array.length tagVal) :: Word8
+                        let afterTagOff = fromIntegral curTagLen + tagOff
+                         in skipFieldRF tagVal tagLen finalOff afterTagOff arr
+    where
+    tagLenW8 = fromIntegral tagLen
 
 data DeserializeBindingNames =
     DeserializeBindingNames
@@ -304,21 +309,22 @@ mkDeserializeExprOne (DataCon cname _ _ fields) =
                  in if isMaybeType ty
                         then [|Nothing|]
                         else [|error $(errStr)|]
+            tagLenAbs = litIntegral (length (nameBase tag))
         [|let slice =
                   Array.Array
                       $(varE bnArr)
                       $(varE bnTagOff)
                       $(varE bnAfterTagOff)
-           in case compare slice $(varE bnTagArr) of
-                  EQ -> $(ifTagEqExp bn ty)
-                  GT -> pure ($(varE bnOffset), $(nothingExp))
-                  LT -> $(skipField (j - 1) bn field)|]
+           in do res <-
+                     Array.asPtrUnsafe slice $ \ptr ->
+                         memcmp1 ptr $(varE bnTagArr) $(tagLenAbs)
+                 case res of
+                     EQ -> $(ifTagEqExp bn ty)
+                     GT -> pure ($(varE bnOffset), $(nothingExp))
+                     LT -> $(skipField (j - 1) bn field)|]
     makeBind _ (_, (Nothing, _)) = error "Cant use non-tagged value"
     makeBind isLastStmt f@(i, (Just tag, _)) = do
-        let tagBase =
-                appE
-                    (varE 'Array.fromList)
-                    (listE (fmap (litIntegral . c2w) (nameBase tag)))
+        let tagBase = litE (StringPrimL (c2w <$> nameBase tag))
         bnTagLen <- newName "tagLen"
         bnTagOff <- newName "tagOff"
         bnAfterTagOff <- newName "afterTagOff"
@@ -328,7 +334,7 @@ mkDeserializeExprOne (DataCon cname _ _ fields) =
                  else tupP [varP (makeI (i + 1)), varP (mkFieldName i)])
             -- XXX Can we ensure there is let-floating? We don't want to compute
             -- this always.
-            ([|let $(varP n_tagArr) = $(tagBase) :: Array.Array Word8
+            ([|let $(varP n_tagArr) = Ptr $(tagBase) :: Ptr Word8
                 in $(makeBindBody
                          (0 :: Int)
                          (DeserializeBindingNames
@@ -345,17 +351,20 @@ mkDeserializeExprOne (DataCon cname _ _ fields) =
     makeBindBody j (DeserializeBindingNames {..}) (_, (Just tag, ty))
         | j < 0 =
             let tagStr = nameBase tag
+                lenTag = length tagStr
                 isMType = isMaybeType ty
                 errStr = litE (StringL (tagStr ++ " is not found."))
              in if isMType
                     then [|deserializeRF
                                $(varE bnTagArr)
+                               $(litIntegral lenTag)
                                $(varE bnFinalOff)
                                $(varE bnOffset)
                                $(varE bnArr)|]
                     else [|fmap (fromMaybe (error $(errStr))) <$>
                            deserializeRF
                                $(varE bnTagArr)
+                               $(litIntegral lenTag)
                                $(varE bnFinalOff)
                                $(varE bnOffset)
                                $(varE bnArr)|]
