@@ -20,18 +20,19 @@ module Streamly.Internal.Data.Serialize.RecordTH
 -- Imports
 --------------------------------------------------------------------------------
 
-import GHC.Ptr (Ptr(..))
+import GHC.Ptr (Ptr(..), plusPtr)
 import Control.Monad (void)
 import Data.List (sortBy)
 import Data.Maybe (fromJust, fromMaybe)
 import Data.Word (Word32, Word8)
-import Data.Char (ord, chr)
+import Data.Char (ord)
 import Streamly.Internal.Data.MutArray.Type (memcmp1)
 
 import Language.Haskell.TH
 import Streamly.Internal.Data.Serialize
 
-import Streamly.Internal.Data.Unbox (MutableByteArray)
+import Streamly.Internal.Data.Unbox (MutableByteArray, getMutableByteArray#)
+import GHC.Exts (byteArrayContents#, unsafeCoerce#)
 
 import qualified Streamly.Internal.Data.Array.Type as Array
 
@@ -310,18 +311,19 @@ mkDeserializeExprOne (DataCon cname _ _ fields) =
                         then [|Nothing|]
                         else [|error $(errStr)|]
             tagLenAbs = litIntegral (length (nameBase tag))
-        [|let slice =
-                  Array.Array
-                      $(varE bnArr)
-                      $(varE bnTagOff)
-                      $(varE bnAfterTagOff)
-           in do res <-
-                     Array.asPtrUnsafe slice $ \ptr ->
-                         memcmp1 ptr $(varE bnTagArr) $(tagLenAbs)
-                 case res of
-                     EQ -> $(ifTagEqExp bn ty)
-                     GT -> pure ($(varE bnOffset), $(nothingExp))
-                     LT -> $(skipField (j - 1) bn field)|]
+        [|do res <-
+                 memcmp1
+                     (plusPtr
+                          (Ptr (byteArrayContents#
+                                    (unsafeCoerce#
+                                         (getMutableByteArray# $(varE bnArr)))))
+                          $(varE bnTagOff))
+                     $(varE bnTagArr)
+                     $(tagLenAbs)
+             case res of
+                 EQ -> $(ifTagEqExp bn ty)
+                 GT -> pure ($(varE bnOffset), $(nothingExp))
+                 LT -> $(skipField (j - 1) bn field)|]
     makeBind _ (_, (Nothing, _)) = error "Cant use non-tagged value"
     makeBind isLastStmt f@(i, (Just tag, _)) = do
         let tagBase = litE (StringPrimL (c2w <$> nameBase tag))

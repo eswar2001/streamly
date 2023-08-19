@@ -44,7 +44,7 @@ import Streamly.Internal.Data.Unbox
 #else
 import Control.DeepSeq (force)
 import Test.QuickCheck (oneof, elements, generate)
-import Streamly.Internal.Data.Unbox (newBytes, MutableByteArray)
+import Streamly.Internal.Data.Unbox (pinnedNewBytes, MutableByteArray)
 import Streamly.Internal.Data.Serialize
 #endif
 
@@ -361,7 +361,7 @@ pokeWithSize arr val = do
 pokeTimesWithSize :: SERIALIZE_CLASS a => a -> Int -> IO ()
 pokeTimesWithSize val times = do
     let n = getSize val
-    arr <- newBytes n
+    arr <- pinnedNewBytes n
     loopWith times pokeWithSize arr val
 
 {-# INLINE poke #-}
@@ -372,7 +372,7 @@ poke arr val = SERIALIZE_OP 0 arr val >> return ()
 pokeTimes :: SERIALIZE_CLASS a => a -> Int -> IO ()
 pokeTimes val times = do
     let n = getSize val
-    arr <- newBytes n
+    arr <- pinnedNewBytes n
     loopWith times poke arr val
 
 {-# INLINE peek #-}
@@ -399,7 +399,7 @@ peek val arr = do
 {-# INLINE peekTimes #-}
 peekTimes :: (Eq a, SERIALIZE_CLASS a) => Int -> a -> Int -> IO ()
 peekTimes n val times = do
-    arr <- newBytes n
+    arr <- pinnedNewBytes n
     _ <- SERIALIZE_OP 0 arr val
     loopWith times peek val arr
 
@@ -407,7 +407,7 @@ peekTimes n val times = do
 trip :: forall a. (Show a, Eq a, SERIALIZE_CLASS a) => a -> IO ()
 trip val = do
     let n = getSize val
-    arr <- newBytes n
+    arr <- pinnedNewBytes n
     _ <- SERIALIZE_OP 0 arr val
 #ifdef USE_UNBOX
     val1
@@ -1006,7 +1006,7 @@ allBenchmarks times =
 allBenchmarks :: BinTree Int -> [Int] -> Transaction -> Int -> [Benchmark]
 allBenchmarks tInt lInt transaction times =
 #endif
-    [ bgroup "sizeOf"
+    [ {- bgroup "sizeOf"
         [
 #ifndef USE_UNBOX
           bench "bintree-int" $ nf sizeOfOnce tInt
@@ -1031,11 +1031,13 @@ allBenchmarks tInt lInt transaction times =
     , benchVar "peekStore" Store.getSize peekTimesStore tInt lInt 1
     , benchVar "roundtrip" getSize (const roundtrip) tInt lInt 1
     , benchVar "roundtripStore" Store.getSize (const roundtripStore) tInt lInt 1
-    , benchTransaction "poke" getSize (const pokeTimes) transaction (times `div` 25)
+-}
+
+     benchTransaction "poke" getSize (const pokeTimes) transaction (times `div` 25)
     , benchTransaction "pokeStore" Store.getSize (const pokeTimesStore) transaction (times `div` 25)
     , benchTransaction "pokeWithSize" getSize (const pokeTimesWithSize) transaction (times `div` 25)
     , benchTransaction "pokeWithSizeStore" Store.getSize (const pokeTimesWithSizeStore) transaction (times `div` 25)
-    , benchTransaction "peek" getSize peekTimes transaction (times `div` 25)
+    ,  benchTransaction "peek" getSize peekTimes transaction (times `div` 25)
     , benchTransaction "peekStore" Store.getSize peekTimesStore transaction (times `div` 25)
     , benchTransaction "roundtrip" getSize (const roundtrip) transaction (times `div` 25)
     , benchTransaction "roundtripStore" Store.getSize (const roundtripStore) transaction (times `div` 25)
