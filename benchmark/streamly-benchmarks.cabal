@@ -377,7 +377,7 @@ benchmark Data.Serialize
   hs-source-dirs: .
   cpp-options: -DUSE_TH
   main-is: Streamly/Benchmark/Data/Serialize.hs
-  build-depends: QuickCheck, text, time, ghc-bignum, store
+  build-depends: QuickCheck, text, time, ghc-bignum, store, bytestring, store-core
 
 benchmark Data.Unfold
   import: bench-options

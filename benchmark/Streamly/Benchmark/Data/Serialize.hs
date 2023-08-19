@@ -91,14 +91,25 @@ import Data.Proxy (Proxy(..))
 
 import Data.Fixed
 
+import Data.Word (Word8)
+
 import Data.Store.TH
-import Data.Store (Store)
+import Data.Store (Store, Poke(..))
+import Data.Store.Core
+    ( PeekException(..)
+    , Poke(..)
+    , PokeState
+    , unsafeMakePokeState
+    )
 import qualified Data.Store as Store
+import qualified Data.Store.Internal as Store
 
 import qualified Streamly.Internal.Data.Serialize.RecordTH as RecordTH
 
 import qualified Streamly.Internal.Data.Serialize.JInternal as JInternal
 
+import           Data.ByteString (ByteString)
+import qualified Data.ByteString.Internal as BS
 
 -------------------------------------------------------------------------------
 -- Types
@@ -426,40 +437,39 @@ roundtrip val times = loop times trip val
 -- Store Helpers
 -------------------------------------------------------------------------------
 
-{-
 {-# INLINE pokeWithSizeStore #-}
-pokeWithSizeStore :: SERIALIZE_CLASS a => MutableByteArray -> a -> IO ()
-pokeWithSizeStore arr val = do
-    let n = getSize val
-    n `seq` SERIALIZE_OP 0 arr val >> return ()
+pokeWithSizeStore :: forall a. Store a => PokeState -> a -> IO ()
+pokeWithSizeStore ps val = do
+    let n = Store.getSize val
+    n `seq` runPoke (Store.poke val) ps 0 >> return ()
 
 {-# INLINE pokeTimesWithSizeStore #-}
-pokeTimesWithSizeStore :: SERIALIZE_CLASS a => a -> Int -> IO ()
+pokeTimesWithSizeStore :: Store a => a -> Int -> IO ()
 pokeTimesWithSizeStore val times = do
-    let n = getSize val
-    arr <- newBytes n
-    loopWith times pokeWithSize arr val
+    let n = Store.getSize val
+    BS.create n $ \ptr -> do
+        ps <- unsafeMakePokeState ptr (pure ptr)
+        loopWith times pokeWithSizeStore ps val
+    pure ()
 
 {-# INLINE pokeStore #-}
-pokeStore :: SERIALIZE_CLASS a => MutableByteArray -> a -> IO ()
-pokeStore arr val = SERIALIZE_OP 0 arr val >> return ()
+pokeStore :: Store a => PokeState -> a -> IO ()
+pokeStore ps val = do
+    runPoke (Store.poke val) ps 0 >> return ()
 
 {-# INLINE pokeTimesStore #-}
-pokeTimesStore :: SERIALIZE_CLASS a => a -> Int -> IO ()
+pokeTimesStore :: Store a => a -> Int -> IO ()
 pokeTimesStore val times = do
-    let n = getSize val
-    arr <- newBytes n
-    loopWith times poke arr val
+    let n = Store.getSize val
+    BS.create n $ \ptr -> do
+        ps <- unsafeMakePokeState ptr (pure ptr)
+        loopWith times pokeStore ps val
+    pure ()
 
 {-# INLINE peekStore #-}
-peekStore :: forall a. (Eq a, SERIALIZE_CLASS a) => a -> MutableByteArray -> IO ()
+peekStore :: forall a. (Eq a, Store a) => a -> ByteString -> IO ()
 peekStore val arr = do
-#ifdef USE_UNBOX
-        (val1 :: a)
-#else
-        (_, val1 :: a)
-#endif
-            <- DESERIALIZE_OP 0 arr
+        (val1 :: a) <- Store.decodeIO arr
         -- XXX We assert in trip but we don't assert here?
         -- Ensure that we are actually constructing the type and using it.
         -- Otherwise we may just read the values and discard them.
@@ -473,33 +483,30 @@ peekStore val arr = do
         return ()
 
 {-# INLINE peekTimesStore #-}
-peekTimesStore :: (Eq a, SERIALIZE_CLASS a) => Int -> a -> Int -> IO ()
+peekTimesStore :: (Eq a, Store a) => Int -> a -> Int -> IO ()
 peekTimesStore n val times = do
-    arr <- newBytes n
-    _ <- SERIALIZE_OP 0 arr val
-    loopWith times peek val arr
--}
+    arr <-
+        BS.create n $ \ptr -> do
+            ps <- unsafeMakePokeState ptr (pure ptr)
+            runPoke (Store.poke val) ps 0
+            return ()
+    loopWith times peekStore val arr
 
 {-# INLINE tripStore #-}
 tripStore :: forall a. (Show a, Eq a, Store a) => a -> IO ()
 tripStore val = do
     let bs = Store.encode val
-    let val1 =
-            case Store.decode bs of
-               Left _ -> undefined
-               Right res -> res
+    val1 <- Store.decodeIO bs
     assert (val == val1) (pure ())
     -- So that the compiler does not optimize it out
-
     if (val1 /= val)
-    then do
-        putStrLn "-----------------------------------------------------"
-        writeFile "val.hs" (show val)
-        putStrLn "-----------------------------------------------------"
-        writeFile "val1.hs" (show val1)
-        error "roundtrip: no match"
-    else return ()
-
+        then do
+            putStrLn "-----------------------------------------------------"
+            writeFile "val.hs" (show val)
+            putStrLn "-----------------------------------------------------"
+            writeFile "val1.hs" (show val1)
+            error "roundtrip: no match"
+        else return ()
     return ()
 
 {-# INLINE roundtripStore #-}
@@ -998,7 +1005,7 @@ allBenchmarks times =
 allBenchmarks :: BinTree Int -> [Int] -> Transaction -> Int -> [Benchmark]
 allBenchmarks tInt lInt transaction times =
 #endif
-    [ {- bgroup "sizeOf"
+    [ bgroup "sizeOf"
         [
 #ifndef USE_UNBOX
           bench "bintree-int" $ nf sizeOfOnce tInt
@@ -1007,24 +1014,28 @@ allBenchmarks tInt lInt transaction times =
         ]
 
     , benchConst "poke" (const pokeTimes) times
+    , benchConst "pokeStore" (const pokeTimesStore) times
     , benchConst "pokeWithSize" (const pokeTimesWithSize) times
+    , benchConst "pokeWithSizeStore" (const pokeTimesWithSizeStore) times
     , benchConst "peek" peekTimes times
--}
-     benchConst "roundtrip" (const roundtrip) times
+    , benchConst "peekStore" peekTimesStore times
+    , benchConst "roundtrip" (const roundtrip) times
     , benchConst "roundtripStore" (const roundtripStore) times
 #ifndef USE_UNBOX
-{-
     , benchVar "poke" (const pokeTimes) tInt lInt 1
+    , benchVar "pokeStore" (const pokeTimesStore) tInt lInt 1
     , benchVar "pokeWithSize" (const pokeTimesWithSize) tInt lInt 1
+    , benchVar "pokeWithSizeStore" (const pokeTimesWithSizeStore) tInt lInt 1
     , benchVar "peek" peekTimes tInt lInt 1
--}
+    , benchVar "peekStore" peekTimesStore tInt lInt 1
     , benchVar "roundtrip" (const roundtrip) tInt lInt 1
     , benchVar "roundtripStore" (const roundtripStore) tInt lInt 1
-{-
     , benchTransaction "poke" (const pokeTimes) transaction (times `div` 25)
+    , benchTransaction "pokeStore" (const pokeTimesStore) transaction (times `div` 25)
     , benchTransaction "pokeWithSize" (const pokeTimesWithSize) transaction (times `div` 25)
+    , benchTransaction "pokeWithSizeStore" (const pokeTimesWithSizeStore) transaction (times `div` 25)
     , benchTransaction "peek" peekTimes transaction (times `div` 25)
--}
+    , benchTransaction "peekStore" peekTimesStore transaction (times `div` 25)
     , benchTransaction "roundtrip" (const roundtrip) transaction (times `div` 25)
     , benchTransaction "roundtripStore" (const roundtripStore) transaction (times `div` 25)
 
