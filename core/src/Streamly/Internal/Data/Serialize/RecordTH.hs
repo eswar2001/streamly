@@ -206,8 +206,7 @@ checkTagRF ::
     -> MutableByteArray
     -> IO (Int, Maybe a)
 checkTagRF tagVal tagLen finalOff backOff tagOff arr = do
-    res <- Array.asPtrUnsafe slice $ \ptr -> memcmp1 ptr tagVal tagLen
-    case res of
+    case memcmpCStr tagVal arr tagOff tagLen of
         EQ ->
             let newOff = afterTagOff + 4
              in fmap Just <$> deserialize newOff arr
