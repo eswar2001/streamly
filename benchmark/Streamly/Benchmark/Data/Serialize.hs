@@ -44,7 +44,7 @@ import Streamly.Internal.Data.Unbox
 #else
 import Control.DeepSeq (force)
 import Test.QuickCheck (oneof, elements, generate)
-import Streamly.Internal.Data.Unbox (pinnedNewBytes, MutableByteArray)
+import Streamly.Internal.Data.Unbox (newBytes, MutableByteArray)
 import Streamly.Internal.Data.Serialize
 #endif
 
@@ -361,7 +361,7 @@ pokeWithSize arr val = do
 pokeTimesWithSize :: SERIALIZE_CLASS a => a -> Int -> IO ()
 pokeTimesWithSize val times = do
     let n = getSize val
-    arr <- pinnedNewBytes n
+    arr <- newBytes n
     loopWith times pokeWithSize arr val
 
 {-# INLINE poke #-}
@@ -372,7 +372,7 @@ poke arr val = SERIALIZE_OP 0 arr val >> return ()
 pokeTimes :: SERIALIZE_CLASS a => a -> Int -> IO ()
 pokeTimes val times = do
     let n = getSize val
-    arr <- pinnedNewBytes n
+    arr <- newBytes n
     loopWith times poke arr val
 
 {-# INLINE peek #-}
@@ -399,7 +399,7 @@ peek val arr = do
 {-# INLINE peekTimes #-}
 peekTimes :: (Eq a, SERIALIZE_CLASS a) => Int -> a -> Int -> IO ()
 peekTimes n val times = do
-    arr <- pinnedNewBytes n
+    arr <- newBytes n
     _ <- SERIALIZE_OP 0 arr val
     loopWith times peek val arr
 
@@ -407,7 +407,7 @@ peekTimes n val times = do
 trip :: forall a. (Show a, Eq a, SERIALIZE_CLASS a) => a -> IO ()
 trip val = do
     let n = getSize val
-    arr <- pinnedNewBytes n
+    arr <- newBytes n
     _ <- SERIALIZE_OP 0 arr val
 #ifdef USE_UNBOX
     val1
@@ -893,6 +893,9 @@ data Transaction  = Transaction
   , _initiationMode :: !(Maybe Text)
   , __MerchantCustomerId :: !(Maybe Text)
   } deriving (Generic, Show, Eq)
+
+-- $(deriveSerialize ''Transaction)
+-- $(makeStore ''Transaction)
 
 $(RecordTH.deriveSerialize ''Transaction)
 $(JInternal.makeJStore ''Transaction)

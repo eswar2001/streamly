@@ -28,8 +28,13 @@ import Data.Word (Word32, Word8)
 import Data.Char (ord)
 import Streamly.Internal.Data.MutArray.Type (memcmp1)
 
+import qualified Foreign.Storable as Storable
+import Streamly.Internal.System.IO (unsafeInlineIO)
+
 import Language.Haskell.TH
 import Streamly.Internal.Data.Serialize
+
+import qualified Streamly.Internal.Data.Unbox as Unbox
 
 import Streamly.Internal.Data.Unbox (MutableByteArray, getMutableByteArray#)
 import GHC.Exts (byteArrayContents#, unsafeCoerce#)
@@ -253,6 +258,21 @@ mapWithLast _ ifLast (x:[]) = ifLast x : []
 mapWithLast ifNotLast ifLast (x:xs) =
     ifNotLast x : mapWithLast ifNotLast ifLast xs
 
+{-# INLINE memcmpCStr #-}
+memcmpCStr :: Ptr Word8 -> MutableByteArray -> Int -> Int -> Ordering
+memcmpCStr ptr0 arr off len = go ptr0 off
+  where
+    end = off + len
+    go _ i
+        | i >= end = EQ
+    go ptr i =
+        case compare
+                 (unsafeInlineIO (Unbox.peekByteIndex i arr))
+                 (unsafeInlineIO (Storable.peek ptr)) of
+            EQ -> go (ptr `plusPtr` 1) (i + 1)
+            GT -> GT
+            LT -> LT
+
 mkDeserializeExprOne :: DataCon -> Q Exp
 mkDeserializeExprOne (DataCon cname _ _ fields) =
     case verifySortedFields fields of
@@ -311,19 +331,14 @@ mkDeserializeExprOne (DataCon cname _ _ fields) =
                         then [|Nothing|]
                         else [|error $(errStr)|]
             tagLenAbs = litIntegral (length (nameBase tag))
-        [|do res <-
-                 memcmp1
-                     (plusPtr
-                          (Ptr (byteArrayContents#
-                                    (unsafeCoerce#
-                                         (getMutableByteArray# $(varE bnArr)))))
-                          $(varE bnTagOff))
-                     $(varE bnTagArr)
-                     $(tagLenAbs)
-             case res of
-                 EQ -> $(ifTagEqExp bn ty)
-                 GT -> pure ($(varE bnOffset), $(nothingExp))
-                 LT -> $(skipField (j - 1) bn field)|]
+        [|case memcmpCStr
+                   $(varE bnTagArr)
+                   $(varE bnArr)
+                   $(varE bnTagOff)
+                   $(tagLenAbs) of
+              EQ -> $(ifTagEqExp bn ty)
+              GT -> pure ($(varE bnOffset), $(nothingExp))
+              LT -> $(skipField (j - 1) bn field)|]
     makeBind _ (_, (Nothing, _)) = error "Cant use non-tagged value"
     makeBind isLastStmt f@(i, (Just tag, _)) = do
         let tagBase = litE (StringPrimL (c2w <$> nameBase tag))
