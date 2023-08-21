@@ -1067,34 +1067,40 @@ allBenchmarks tInt lInt transaction times =
 #endif
         ]
 
-    , benchConst "poke" getSize (const pokeTimes) times
-    , benchConst "pokeStore" Store.getSize (const pokeTimesStore) times
-    -- , benchConst "pokeWithSize" getSize (const pokeTimesWithSize) times
-    , benchConst "encode" (const encodeTimes) times
-    , benchConst "pokeWithSizeStore" Store.getSize (const pokeTimesWithSizeStore) times
-    , benchConst "peek" getSize peekTimes times
-    , benchConst "peekStore" Store.getSize peekTimesStore times
-    , benchConst "roundtrip" getSize (const roundtrip) times
-    , benchConst "roundtripStore" Store.getSize (const roundtripStore) times
+    , bgroup "Serialize"
+      [ benchConst "poke" getSize (const pokeTimes) times
+      -- , benchConst "pokeWithSize" getSize (const pokeTimesWithSize) times
+      , benchConst "encode" (const encodeTimes) times
+      , benchConst "peek" getSize peekTimes times
+      , benchConst "roundtrip" getSize (const roundtrip) times
 #ifndef USE_UNBOX
-    , benchVar "poke" getSize (const pokeTimes) tInt lInt 1
-    , benchVar "pokeStore" Store.getSize (const pokeTimesStore) tInt lInt 1
-    -- , benchVar "pokeWithSize" getSize (const pokeTimesWithSize) tInt lInt 1
-    , benchVar "encode" (const encodeTimes) tInt lInt 1
-    , benchVar "pokeWithSizeStore" Store.getSize (const pokeTimesWithSizeStore) tInt lInt 1
-    , benchVar "peek" getSize peekTimes tInt lInt 1
-    , benchVar "peekStore" Store.getSize peekTimesStore tInt lInt 1
-    , benchVar "roundtrip" getSize (const roundtrip) tInt lInt 1
-    , benchVar "roundtripStore" Store.getSize (const roundtripStore) tInt lInt 1
-    , benchTransaction "poke" getSize (const pokeTimes) transaction (times `div` 25)
-    , benchTransaction "pokeStore" Store.getSize (const pokeTimesStore) transaction (times `div` 25)
-    , benchTransaction "pokeWithSize" getSize (const pokeTimesWithSize) transaction (times `div` 25)
-    , benchTransaction "pokeWithSizeStore" Store.getSize (const pokeTimesWithSizeStore) transaction (times `div` 25)
-    , benchTransaction "peek" getSize peekTimes transaction (times `div` 25)
-    , benchTransaction "peekStore" Store.getSize peekTimesStore transaction (times `div` 25)
-    , benchTransaction "roundtrip" getSize (const roundtrip) transaction (times `div` 25)
-    , benchTransaction "roundtripStore" Store.getSize (const roundtripStore) transaction (times `div` 25)
+      , benchVar "poke" getSize (const pokeTimes) tInt lInt 1
+      -- , benchVar "pokeWithSize" getSize (const pokeTimesWithSize) tInt lInt 1
+      , benchVar "encode" (const encodeTimes) tInt lInt 1
+      , benchVar "peek" getSize peekTimes tInt lInt 1
+      , benchVar "roundtrip" getSize (const roundtrip) tInt lInt 1
+      , benchTransaction "poke" getSize (const pokeTimes) transaction (times `div` 25)
+      , benchTransaction "pokeWithSize" getSize (const pokeTimesWithSize) transaction (times `div` 25)
+      , benchTransaction "peek" getSize peekTimes transaction (times `div` 25)
+      , benchTransaction "roundtrip" getSize (const roundtrip) transaction (times `div` 25)
+      ]
+#endif
 
+    , bgroup "Store"
+      [ benchConst "poke" Store.getSize (const pokeTimesStore) times
+      , benchConst "pokeWithSize" Store.getSize (const pokeTimesWithSizeStore) times
+      , benchConst "peek" Store.getSize peekTimesStore times
+      , benchConst "roundtrip" Store.getSize (const roundtripStore) times
+#ifndef USE_UNBOX
+      , benchVar "poke" Store.getSize (const pokeTimesStore) tInt lInt 1
+      , benchVar "pokeWithSize" Store.getSize (const pokeTimesWithSizeStore) tInt lInt 1
+      , benchVar "peek" Store.getSize peekTimesStore tInt lInt 1
+      , benchVar "roundtrip" Store.getSize (const roundtripStore) tInt lInt 1
+      , benchTransaction "poke" Store.getSize (const pokeTimesStore) transaction (times `div` 25)
+      , benchTransaction "pokeWithSize" Store.getSize (const pokeTimesWithSizeStore) transaction (times `div` 25)
+      , benchTransaction "peek" Store.getSize peekTimesStore transaction (times `div` 25)
+      , benchTransaction "roundtrip" Store.getSize (const roundtripStore) transaction (times `div` 25)
+      ]
 #endif
     ]
 
