@@ -707,18 +707,20 @@ $(makeStore ''PayerInfo)
 
 instance Arbitrary PayerInfo where
     arbitrary =
-        PayerInfo <$> arbitrary <*> arbitrary <*> arbitrary <*> arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary
+        PayerInfo <$> (Just <$> arbitrary) <*> (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary)
 
 -- add more fields if required to PayeeInfo
 data PayeeInfo  =
@@ -742,15 +744,17 @@ $(makeStore ''PayeeInfo)
 
 instance Arbitrary PayeeInfo where
     arbitrary =
-        PayeeInfo <$> arbitrary <*> arbitrary <*> arbitrary <*> arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary
+        PayeeInfo <$> (Just <$> arbitrary) <*> (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary)
 
 -- add more fields if required to NpciResponse
 data NpciResponse  =
@@ -769,13 +773,15 @@ data NpciResponse  =
 
 instance Arbitrary NpciResponse where
     arbitrary =
-        NpciResponse <$> arbitrary <*> arbitrary <*> arbitrary <*> arbitrary <*>
+        NpciResponse <$> (Just <$> arbitrary) <*> (Just <$> arbitrary) <*>
         arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary)
 
 $(deriveSerialize ''NpciResponse)
 $(makeStore ''NpciResponse)
@@ -812,22 +818,24 @@ $(makeStore ''TxnInfo)
 
 instance Arbitrary TxnInfo where
     arbitrary =
-        TxnInfo <$> arbitrary <*> arbitrary <*> arbitrary <*> arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary
+        TxnInfo <$> arbitrary <*> (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary)
 
 data Transaction  = Transaction
   { _id :: !Text
@@ -874,37 +882,39 @@ $(makeStore ''Transaction)
 
 instance Arbitrary Transaction where
     arbitrary =
-        Transaction <$> arbitrary <*> arbitrary <*> arbitrary <*> arbitrary <*>
+        Transaction <$> arbitrary <*> arbitrary <*>
         arbitrary <*>
+        (Just <$> arbitrary) <*>
         arbitrary <*>
+        (Just <$> arbitrary) <*>
         arbitrary <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
         arbitrary <*>
+        (Just <$> arbitrary) <*>
         arbitrary <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
         arbitrary <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
         arbitrary <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
         arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary <*>
-        arbitrary
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary) <*>
+        (Just <$> arbitrary)
 
 
 -------------------------------------------------------------------------------
