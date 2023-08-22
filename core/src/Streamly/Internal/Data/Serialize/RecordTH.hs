@@ -22,7 +22,7 @@ module Streamly.Internal.Data.Serialize.RecordTH
 
 import GHC.Ptr (Ptr(..), plusPtr)
 import Control.Monad (void)
-import Data.List (sortBy)
+import Data.List (sortBy, findIndex)
 import Data.Maybe (fromJust, fromMaybe)
 import Data.Word (Word32, Word8)
 import Data.Char (ord)
@@ -98,29 +98,30 @@ n_capacityOff = mkName "capacityOff"
 litIntegral :: Integral a => a -> Q Exp
 litIntegral i = litE (IntegerL (fromIntegral i))
 
-verifySortedFields :: [Field] -> [Field]
-verifySortedFields fields =
-    let sortedFields = sortBy cmpF fields
-     in if sortedFields == fields
-            then fields
-            else error
-                     ("The fields are not sorted, the correct order is: " ++
-                      show (map (nameBase . fromJust . fst) sortedFields))
-  where
-    cmpF (Just tag1, _) (Just tag2, _) =
-        let t1 = nameBase tag1
-            t2 = nameBase tag2
-         in case compare (length t1) (length t2) of
-                EQ -> compare t1 t2
-                cmpRes -> cmpRes
-    cmpF _ _ = error "Cant use non-tagged value"
+cmpField :: Field -> Field -> Ordering
+cmpField (Just tag1, _) (Just tag2, _) =
+    let t1 = nameBase tag1
+        t2 = nameBase tag2
+     in case compare (length t1) (length t2) of
+            EQ -> compare t1 t2
+            cmpRes -> cmpRes
+cmpField _ _ = error "Cant use non-tagged value"
 
-matchConstructor :: Name -> Int -> Q Exp -> Q Match
-matchConstructor cname numFields exp0 =
+sortFields :: [Field] -> [Field]
+sortFields fields = sortBy cmpField fields
+
+matchConstructor :: Name -> [Field] -> Q Exp -> Q Match
+matchConstructor cname fields exp0 =
     match
-        (conP cname (map varP (map mkFieldName [0 .. (numFields - 1)])))
+        (conP cname (map (varP . mkFieldName) indicesUnsorted))
         (normalB exp0)
         []
+  where
+    sortedFields = sortFields fields
+    indicesUnsorted =
+        fmap
+            (\x -> fromJust $ findIndex (\a -> cmpField x a == EQ) sortedFields)
+            fields
 
 isMaybeType :: Type -> Bool
 isMaybeType (AppT (ConT m) _) = m == ''Maybe
@@ -177,7 +178,7 @@ mkSizeOfExpr headTy constructors =
         [|$(acc) + 4 +
           $(appE (varE 'sum) (listE (map exprGetSize (zip [0 ..] fields))))|]
     matchCons acc (DataCon cname _ _ fields) =
-        matchConstructor cname (length fields) (sizeOfFields acc fields)
+        matchConstructor cname fields (sizeOfFields acc (sortFields fields))
 
 --------------------------------------------------------------------------------
 -- Peek
@@ -281,8 +282,8 @@ memcmpCStr ptr0 arr off len = go ptr0 off
             LT -> LT
 
 mkDeserializeExprOne :: DataCon -> Q Exp
-mkDeserializeExprOne (DataCon cname _ _ fields) =
-    case verifySortedFields fields of
+mkDeserializeExprOne (DataCon cname _ _ fields0) =
+    case sortedFields of
         [] -> [|pure ($(varE (mkName "i0")), $(conE cname))|]
         _ ->
             doE
@@ -296,17 +297,19 @@ mkDeserializeExprOne (DataCon cname _ _ fields) =
                  mapWithLast
                      (makeBind False)
                      (makeBind True)
-                     (zip [0 ..] fields) ++
+                     (zip [0 ..] sortedFields) ++
                  [ noBindS
                        [|pure
                              ( $(varE n_finalOff)
-                             , $(appsE
-                                     (conE cname :
-                                      (varE . mkFieldName <$>
-                                       [0 .. (lenFields - 1)]))))|]
+                             , $(recConE
+                                     cname
+                                     (fmap fieldToRecC sortedFieldsNamesIndexed)))|]
                  ])
   where
-    lenFields = length fields
+    fieldToRecC (i, name) = (name, ) <$> varE (mkFieldName i)
+    sortedFields = sortFields fields0
+    sortedFieldsNamesIndexed = zip [0 ..] (fmap (fromJust . fst) sortedFields)
+    lenFields = length sortedFields
     skipField j bn@(DeserializeBindingNames {..}) field = do
         bnOffset1 <- newName "offset"
         bnTagLen1 <- newName "tagLen"
@@ -322,10 +325,7 @@ mkDeserializeExprOne (DataCon cname _ _ fields) =
         [|do let nextFieldOffOff =
                      fromIntegral $(varE bnTagLen) + $(varE bnTagOff)
              (_, nextFieldOff) <-
-                 deserialize
-                     nextFieldOffOff
-                     $(varE bnArr)
-                     $(varE n_capacityOff)
+                 deserialize nextFieldOffOff $(varE bnArr) $(varE n_capacityOff)
              let $(varP bnOffset1) = w32ToInt nextFieldOff
              $(makeBindBody j bn1 field)|]
     ifTagEqExp (DeserializeBindingNames {..}) ty = do
@@ -473,12 +473,12 @@ i2w :: Int -> Word8
 i2w = fromIntegral
 
 mkSerializeExprFields :: [Field] -> Q Exp
-mkSerializeExprFields fields =
-    case verifySortedFields fields of
+mkSerializeExprFields fields0 =
+    case sortedFields of
         [] -> [|pure ($(varE (mkName "i0")))|]
         _ ->
             doE
-                (fmap makeBind (zip [0 ..] fields) ++
+                (fmap makeBind (zip [0 ..] sortedFields) ++
                  [ noBindS
                        [|Unbox.pokeByteIndex
                              $(varE n_finalOffOff)
@@ -487,7 +487,8 @@ mkSerializeExprFields fields =
                  , noBindS [|pure $(varE (makeI numFields))|]
                  ])
   where
-    numFields = length fields
+    sortedFields = sortFields fields0
+    numFields = length sortedFields
     makeBindTag :: Name -> (Int, Word8) -> Q Stmt
     makeBindTag ioff (t, w8) = do
         let w8Exp = litIntegral w8
@@ -551,7 +552,7 @@ mkSerializeExpr headTy cons =
                         (varE n_val)
                         [ matchConstructor
                               cname
-                              (length fields)
+                              fields
                               (mkSerializeExprFields fields)
                         ])|]
         _ -> error
