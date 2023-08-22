@@ -286,19 +286,54 @@ memcmpCStr ptr0 arr off len = go ptr0 off
 w8To16 :: Word8 -> Word16
 w8To16 = fromIntegral
 
-{-# INLINE xorCull #-}
-xorCull :: (Integral a, Bits a) => a -> a -> Word8
-xorCull a b = fromIntegral (xor a b)
+{-# INLINE xorFill #-}
+xorFill :: (Integral a, Bits a) => a -> a -> Word64
+xorFill a b = fromIntegral (xor a b)
 
+shiftAdd conv xs =
+    foldl' (.|.) zeroBits $
+    map (\(j, x) -> shiftL x (j * 8)) $
+    zip [(length xs - 1),(length xs - 2) .. 0] $ map conv xs
+
+-- XXX Single byte comparision seems to be the fastest!
 -- XXX This is architecture dependent?
 -- XXX Little endian did not work?
 xorCmp :: [Word8] -> Name -> Name -> Q Exp
+{-
+xorCmp tag arr off
+    | length tag > 8 = [|$(go 0) == zeroBits|]
+  where
+    tagLen = length tag
+    last8Off = tagLen - 8
+    go i
+        | i >= tagLen = [|zeroBits|]
+    go i
+        | i > last8Off = go last8Off
+    go i = do
+        let ty = [t|Word64|]
+            offInc = 8
+            wIntegral =
+                litIntegral
+                    (shiftAdd
+                         w8To16
+                         [ tag !! i
+                         , tag !! (i + 1)
+                         , tag !! (i + 2)
+                         , tag !! (i + 3)
+                         , tag !! (i + 4)
+                         , tag !! (i + 5)
+                         , tag !! (i + 6)
+                         , tag !! (i + 7)
+                         ])
+        [|xor (unsafeInlineIO
+                   (Unbox.peekByteIndex
+                        ($(varE off) + $(litIntegral i))
+                        $(varE arr)))
+              ($(wIntegral) :: $(ty)) .|.
+          $(go (i + offInc))|]
+-}
 xorCmp tag arr off = [|$(go 0) == zeroBits|]
   where
-    shiftAdd conv xs =
-        foldl' (.|.) zeroBits $
-        map (\(j, x) -> shiftL x (j * 8)) $
-        zip [(length xs - 1),(length xs - 2) .. 0] $ map conv xs
     tagLen = length tag
     go i
         | i >= tagLen = [|zeroBits|]
@@ -347,6 +382,7 @@ xorCmp tag arr off = [|$(go 0) == zeroBits|]
                                      , tag !! (i + 6)
                                      , tag !! (i + 7)
                                      ])
+
         [|xor
               (unsafeInlineIO
                    (Unbox.peekByteIndex
