@@ -265,6 +265,18 @@ mapWithLast _ ifLast (x:[]) = ifLast x : []
 mapWithLast ifNotLast ifLast (x:xs) =
     ifNotLast x : mapWithLast ifNotLast ifLast xs
 
+{-# INLINE memcpyCStr #-}
+memcpyCStr :: Ptr Word8 -> MutableByteArray -> Int -> Int -> IO ()
+memcpyCStr ptr0 arr off len = go ptr0 off
+  where
+    end = off + len
+    go _ i
+        | i >= end = pure ()
+    go ptr i = do
+        val <- Storable.peek ptr
+        Unbox.pokeByteIndex i arr val
+        go (ptr `plusPtr` 1) (i + 1)
+
 {-# INLINE memcmpCStr #-}
 memcmpCStr :: Ptr Word8 -> MutableByteArray -> Int -> Int -> Ordering
 memcmpCStr ptr0 arr off len = go ptr0 off
@@ -504,16 +516,17 @@ mkSerializeExprFields fields =
             isMType = isMaybeType ty
             n_value = mkName "value"
             sexpr =
-                [|do $(varP (makeIT i 0)) <-
+                [|do tagOff <-
                          serialize
                              $(varE (makeI i))
                              $(varE n_arr)
                              ($(litIntegral lenTagBase) :: Word8)
-                     postTagOff <-
-                         $(doE (fmap (makeBindTag i) (zip [0 ..] tagBase) ++
-                                [ noBindS
-                                      [|pure $(varE (makeIT i lenTagBaseRaw))|]
-                                ]))
+                     memcpyCStr
+                             (Ptr $(litE (StringPrimL tagBase)))
+                             $(varE n_arr)
+                             tagOff
+                             $(litIntegral lenTagBaseRaw)
+                     let postTagOff = tagOff + $(litIntegral lenTagBaseRaw)
                      nextOff <-
                          serialize (postTagOff + 4) $(varE n_arr) $(varE n_value)
                      void $ serialize
