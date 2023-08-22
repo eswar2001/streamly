@@ -378,7 +378,9 @@ benchmark Data.Serialize
   type: exitcode-stdio-1.0
   hs-source-dirs: .
   cpp-options: -DUSE_TH
+  hs-source-dirs: Streamly/Benchmark/Data
   main-is: Streamly/Benchmark/Data/Serialize.hs
+  other-modules: Transaction
   build-depends: QuickCheck, text, time, ghc-bignum, store, bytestring, store-core
 
 benchmark Data.Unfold
