@@ -480,7 +480,7 @@ mkSerializeExprFields fields =
             doE
                 (fmap makeBind (zip [0 ..] fields) ++
                  [ noBindS
-                       [|void $ serialize
+                       [|Unbox.pokeByteIndex
                              $(varE n_finalOffOff)
                              $(varE n_arr)
                              (fromIntegral $(varE (makeI numFields)) :: Word32)|]
@@ -488,11 +488,14 @@ mkSerializeExprFields fields =
                  ])
   where
     numFields = length fields
-    makeBindTag i (t, w8) = do
+    makeBindTag :: Name -> (Int, Word8) -> Q Stmt
+    makeBindTag ioff (t, w8) = do
         let w8Exp = litIntegral w8
-        bindS
-            (varP (makeIT i (t + 1)))
-            [|serialize $(varE (makeIT i t)) $(varE n_arr) ($(w8Exp) :: Word8)|]
+        noBindS
+            [|Unbox.pokeByteIndex
+                  ($(varE ioff) + $(litIntegral t))
+                  $(varE n_arr)
+                  ($(w8Exp) :: Word8)|]
     makeBind (_, (Nothing, _)) = error "Cant use non-tagged value"
     makeBind (i, (Just tag, ty)) =
         let tagBase = fmap c2w (nameBase tag)
@@ -503,23 +506,30 @@ mkSerializeExprFields fields =
                     else i2w lenTagBaseRaw :: Word8
             isMType = isMaybeType ty
             n_value = mkName "value"
-            sexpr =
-                [|do $(varP (makeIT i 0)) <-
-                         serialize
-                             $(varE (makeI i))
-                             $(varE n_arr)
-                             ($(litIntegral lenTagBase) :: Word8)
+            sexpr = do
+                toff <- newName "tagOff"
+                [|do serialize
+                         $(varE (makeI i))
+                         $(varE n_arr)
+                         ($(litIntegral lenTagBase) :: Word8)
+                     let $(varP toff) = $(varE (makeI i)) + 1
                      postTagOff <-
-                         $(doE (fmap (makeBindTag i) (zip [0 ..] tagBase) ++
+                         $(doE (fmap (makeBindTag toff) (zip [0 ..] tagBase) ++
                                 [ noBindS
-                                      [|pure $(varE (makeIT i lenTagBaseRaw))|]
+                                      [|pure
+                                            ($(varE toff) +
+                                             $(litIntegral lenTagBaseRaw))|]
                                 ]))
                      nextOff <-
-                         serialize (postTagOff + 4) $(varE n_arr) $(varE n_value)
-                     void $ serialize
-                         postTagOff
-                         $(varE n_arr)
-                         (fromIntegral nextOff :: Word32)
+                         serialize
+                             (postTagOff + 4)
+                             $(varE n_arr)
+                             $(varE n_value)
+                     void $
+                         serialize
+                             postTagOff
+                             $(varE n_arr)
+                             (fromIntegral nextOff :: Word32)
                      pure nextOff|]
          in bindS
                 (varP (makeI (i + 1)))
