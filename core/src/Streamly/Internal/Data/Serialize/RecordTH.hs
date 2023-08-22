@@ -22,9 +22,9 @@ module Streamly.Internal.Data.Serialize.RecordTH
 
 import GHC.Ptr (Ptr(..), plusPtr)
 import Control.Monad (void)
-import Data.List (sortBy, findIndex)
+import Data.List (sortBy, findIndex, foldl')
 import Data.Maybe (fromJust, fromMaybe)
-import Data.Word (Word32, Word8)
+import Data.Word (Word16, Word32, Word64, Word8)
 import Data.Char (ord)
 import Streamly.Internal.Data.MutArray.Type (memcmp1)
 
@@ -33,6 +33,8 @@ import Streamly.Internal.System.IO (unsafeInlineIO)
 
 import Language.Haskell.TH
 import Streamly.Internal.Data.Serialize
+
+import Data.Bits ((.|.), xor, zeroBits, shiftL, Bits)
 
 import qualified Streamly.Internal.Data.Unbox as Unbox
 
@@ -281,6 +283,114 @@ memcmpCStr ptr0 arr off len = go ptr0 off
             GT -> GT
             LT -> LT
 
+w8To16 :: Word8 -> Word16
+w8To16 = fromIntegral
+
+{-# INLINE xorFill #-}
+xorFill :: (Integral a, Bits a) => a -> a -> Word64
+xorFill a b = fromIntegral (xor a b)
+
+shiftAdd conv xs =
+    foldl' (.|.) zeroBits $
+    map (\(j, x) -> shiftL x (j * 8)) $
+    zip [(length xs - 1),(length xs - 2) .. 0] $ map conv xs
+
+-- XXX Single byte comparision seems to be the fastest!
+-- XXX This is architecture dependent?
+-- XXX Little endian did not work?
+xorCmp :: [Word8] -> Name -> Name -> Q Exp
+{-
+xorCmp tag arr off
+    | length tag > 8 = [|$(go 0) == zeroBits|]
+  where
+    tagLen = length tag
+    last8Off = tagLen - 8
+    go i
+        | i >= tagLen = [|zeroBits|]
+    go i
+        | i > last8Off = go last8Off
+    go i = do
+        let ty = [t|Word64|]
+            offInc = 8
+            wIntegral =
+                litIntegral
+                    (shiftAdd
+                         w8To16
+                         [ tag !! i
+                         , tag !! (i + 1)
+                         , tag !! (i + 2)
+                         , tag !! (i + 3)
+                         , tag !! (i + 4)
+                         , tag !! (i + 5)
+                         , tag !! (i + 6)
+                         , tag !! (i + 7)
+                         ])
+        [|xor (unsafeInlineIO
+                   (Unbox.peekByteIndex
+                        ($(varE off) + $(litIntegral i))
+                        $(varE arr)))
+              ($(wIntegral) :: $(ty)) .|.
+          $(go (i + offInc))|]
+-}
+xorCmp tag arr off = [|$(go 0) == zeroBits|]
+  where
+    tagLen = length tag
+    go i
+        | i >= tagLen = [|zeroBits|]
+    go i = do
+        let remainingChars = tagLen - i
+            ty =
+                case remainingChars of
+                    x
+                        | otherwise -> [t|Word8|]
+                        | x < 4 -> [t|Word16|]
+                        | x < 8 -> [t|Word32|]
+                        | otherwise -> [t|Word64|]
+            offInc =
+                case remainingChars of
+                    x
+                        | otherwise -> 1
+                        | x < 4 -> 2
+                        | x < 8 -> 4
+                        | otherwise -> 8
+            wIntegral =
+                case remainingChars of
+                    x
+                        | otherwise -> litIntegral (tag !! i)
+                        | x < 4 ->
+                            litIntegral
+                                (shiftAdd w8To16 [tag !! i, tag !! (i + 1)])
+                        | x < 8 ->
+                            litIntegral
+                                (shiftAdd
+                                     w8To16
+                                     [ tag !! i
+                                     , tag !! (i + 1)
+                                     , tag !! (i + 2)
+                                     , tag !! (i + 3)
+                                     ])
+                        | otherwise ->
+                            litIntegral
+                                (shiftAdd
+                                     w8To16
+                                     [ tag !! i
+                                     , tag !! (i + 1)
+                                     , tag !! (i + 2)
+                                     , tag !! (i + 3)
+                                     , tag !! (i + 4)
+                                     , tag !! (i + 5)
+                                     , tag !! (i + 6)
+                                     , tag !! (i + 7)
+                                     ])
+
+        [|xor
+              (unsafeInlineIO
+                   (Unbox.peekByteIndex
+                        ($(varE off) + $(litIntegral i))
+                        $(varE arr)))
+              ($(wIntegral) :: $(ty)) .|.
+          $(go (i + offInc))|]
+
 mkDeserializeExprOne :: DataCon -> Q Exp
 mkDeserializeExprOne (DataCon cname _ _ fields0) =
     case sortedFields of
@@ -353,14 +463,17 @@ mkDeserializeExprOne (DataCon cname _ _ fields0) =
                         then [|Nothing|]
                         else [|error $(errStr)|]
             tagLenAbs = litIntegral (length (nameBase tag))
-        [|case memcmpCStr
-                   $(varE bnTagArr)
-                   $(varE bnArr)
-                   $(varE bnTagOff)
-                   $(tagLenAbs) of
-              EQ -> $(ifTagEqExp bn ty)
-              GT -> pure ($(varE bnOffset), $(nothingExp))
-              LT -> $(skipField (j - 1) bn field)|]
+            tagW8 = c2w <$> nameBase tag
+        [|if $(xorCmp tagW8 bnArr bnTagOff)
+              then $(ifTagEqExp bn ty)
+              else case memcmpCStr
+                            $(varE bnTagArr)
+                            $(varE bnArr)
+                            $(varE bnTagOff)
+                            $(tagLenAbs) of
+                       EQ -> $(ifTagEqExp bn ty)
+                       GT -> pure ($(varE bnOffset), $(nothingExp))
+                       LT -> $(skipField (j - 1) bn field)|]
     makeBind _ (_, (Nothing, _)) = error "Cant use non-tagged value"
     makeBind isLastStmt f@(i, (Just tag, _)) = do
         let tagBase = litE (StringPrimL (c2w <$> nameBase tag))
