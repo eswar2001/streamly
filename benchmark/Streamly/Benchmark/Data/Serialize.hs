@@ -108,11 +108,13 @@ import qualified Data.ByteString.Internal as BS
 
 import qualified Streamly.Internal.Data.Serialize.RecordTH as RecordTH
 import qualified Streamly.Internal.Data.Serialize.JInternal as JInternal
+import Transaction (Transaction(..))
 
 -------------------------------------------------------------------------------
 -- Types
 -------------------------------------------------------------------------------
 
+{-
 data Unit = Unit
     deriving (Generic, Show, Eq)
 
@@ -291,6 +293,7 @@ mkBinTree = go (generate $ arbitrary)
     go r n = Tree <$> go r (n - 1) <*> go r (n - 1)
 
 #endif
+-}
 
 -------------------------------------------------------------------------------
 -- Size helpers
@@ -371,7 +374,7 @@ peek (val, _) arr = do
         (val1 :: a) <- DESERIALIZE_OP 0 arr
 #else
 peek (val, n) arr = do
-        (_, val1 :: a) <- DESERIALIZE_OP 0 arr n
+        !(_, val1 :: a) <- DESERIALIZE_OP 0 arr n
 #endif
         -- Ensure that we are actually constructing the type and using it. This
         -- is important, otherwise the structure is created and discarded, the
@@ -380,9 +383,12 @@ peek (val, n) arr = do
         -- cost though. We could use deepseq but then we need to write
         -- instances of NFData and ensure that they are correct and perform
         -- well. Equality check also ensures correctness.
+        {-
         if (val1 /= val)
         then error "peek: no match"
         else return ()
+        -}
+        return ()
 
 {-# INLINE peekTimes #-}
 peekTimes :: (Eq a, SERIALIZE_CLASS a) => Int -> a -> Int -> IO ()
@@ -400,12 +406,15 @@ trip val = do
 #ifdef USE_UNBOX
     val1 <- DESERIALIZE_OP 0 arr
 #else
-    (_, val1) <- DESERIALIZE_OP 0 arr n
+    !(_, val1 :: a) <- DESERIALIZE_OP 0 arr n
 #endif
     -- Do not remove this, see the comments in peek.
+    {-
     if (val1 /= val)
     then error "trip: no match"
     else return ()
+    -}
+    return ()
 
 {-# INLINE roundtrip #-}
 roundtrip :: (Show a, Eq a, SERIALIZE_CLASS a) => a -> Int -> IO ()
@@ -447,15 +456,17 @@ pokeTimesStore val times = do
 {-# INLINE peekStore #-}
 peekStore :: forall a. (Eq a, Store a) => a -> ByteString -> IO ()
 peekStore val arr = do
-        (val1 :: a) <- Store.decodeIO arr
+        !(val1 :: a) <- Store.decodeIO arr
         -- XXX We assert in trip but we don't assert here?
         -- Ensure that we are actually constructing the type and using it.
         -- Otherwise we may just read the values and discard them.
         -- The comparison adds to the cost though.
         --
+        {-
         if (val1 /= val)
         then error "peekStore: no match"
         else return ()
+        -}
         return ()
 
 {-# INLINE peekTimesStore #-}
@@ -472,11 +483,13 @@ peekTimesStore n val times = do
 tripStore :: forall a. (Show a, Eq a, Store a) => a -> IO ()
 tripStore val = do
     let bs = Store.encode val
-    val1 <- Store.decodeIO bs
+    !(val1 :: a) <- Store.decodeIO bs
     -- So that the compiler does not optimize it out
+    {-
     if (val1 /= val)
         then error "tripStore: no match"
         else return ()
+    -}
     return ()
 
 {-# INLINE roundtripStore #-}
@@ -484,443 +497,10 @@ roundtripStore :: (Show a, Eq a, Store a) => a -> Int -> IO ()
 roundtripStore val times = loop times tripStore val
 
 -------------------------------------------------------------------------------
--- Record
--------------------------------------------------------------------------------
-
-unpackInt :: Int -> Int#
-unpackInt (I# i#) = i#
-
-data LiftedInteger
-    = LIS Int
-    | LIP (Array Word)
-    | LIN (Array Word)
-
-$(deriveSerialize ''LiftedInteger)
-
--- How costly is the boxing going to be?
-
-liftInteger :: Integer -> LiftedInteger
-liftInteger (IS x) = LIS (I# x)
-liftInteger (IP x) =
-    LIP (Array (MutableByteArray (unsafeCoerce# x)) 0 (I# (sizeofByteArray# x)))
-liftInteger (IN x) =
-    LIN (Array (MutableByteArray (unsafeCoerce# x)) 0 (I# (sizeofByteArray# x)))
-
-unliftInteger :: LiftedInteger -> Integer
-unliftInteger (LIS (I# x)) = IS x
-unliftInteger (LIP (Array (MutableByteArray x) _ _)) = IP (unsafeCoerce# x)
-unliftInteger (LIN (Array (MutableByteArray x) _ _)) = IN (unsafeCoerce# x)
-
-$(deriveSerialize ''E12)
-$(deriveSerialize ''Fixed)
-
-instance Serialize Integer where
-    {-# INLINE size #-}
-    size =
-        Size $ \i a ->
-            case size :: Size LiftedInteger of
-                Size f -> f i (liftInteger a)
-
-    {-# INLINE deserialize #-}
-    deserialize off arr end = fmap unliftInteger <$> deserialize off arr end
-
-    {-# INLINE serialize #-}
-    serialize off arr val = serialize off arr (liftInteger val)
-
-$(deriveSerialize ''Maybe)
-$(deriveSerialize ''Day)
-$(deriveSerialize ''TimeOfDay)
-$(deriveSerialize ''LocalTime)
-
-instance Arbitrary Day where
-    arbitrary = fromOrdinalDate <$> arbitrary <*> arbitrary
-
-instance Arbitrary TimeOfDay where
-    arbitrary =
-        TimeOfDay <$> arbitrary <*> arbitrary <*> (MkFixed <$> arbitrary)
-
-instance Arbitrary LocalTime where
-    arbitrary = LocalTime <$> arbitrary <*> arbitrary
-
-instance Serialize Text where
-    {-# INLINE size #-}
-    size =
-        Size $ \i a ->
-            case size :: Size (Array Word16) of
-                Size f -> f i (txtToArr a)
-
-    {-# INLINE deserialize #-}
-    deserialize off arr end = fmap arrToTxt <$> deserialize off arr end
-
-    {-# INLINE serialize #-}
-    serialize off arr val = serialize off arr (txtToArr val)
-
--- | Convert a 'Text' to an array of 'Word16'. It can be done in constant time.
-{-# INLINE txtToArr #-}
-txtToArr :: Text -> Array Word16
-txtToArr (Text (TArr.Array _) _ len)
-    | len == 0 = Array Unbox.nil 0 0
-txtToArr (Text (TArr.Array barr#) off16 len16) =
-    let off8 = off16 * 2
-        len8 = len16 * 2
-    in Array (MutableByteArray (unsafeCoerce# barr#)) off8 (off8 + len8)
-
-{-# INLINE arrToTxt #-}
-arrToTxt :: Array Word16 -> Text
-arrToTxt Array {..}
-    | len8 == 0 = T.empty
-    | otherwise = Text (TArr.Array (unsafeCoerce# marr#)) off16 len16
-
-    where
-
-    len8 = arrEnd - arrStart
-    off8 = arrStart
-    len16 = len8 `div` 2
-    off16 = off8 `div` 2
-    !(MutableByteArray marr#) = arrContents
-
-instance Arbitrary Text where
-    arbitrary = T.pack <$> arbitrary
-
-data TransactionMode
-    = IFSC
-    | UPI
-    deriving (Generic, Show, Eq, Ord, Read, Enum)
-
-instance Arbitrary TransactionMode where
-    arbitrary = elements [IFSC, UPI]
-
-$(deriveSerialize ''TransactionMode)
-$(makeStore ''TransactionMode)
-
-data TransactionType
-    = PAY
-    | COLLECT
-    deriving (Generic, Show, Eq, Ord, Read, Enum)
-
-instance Arbitrary TransactionType where
-    arbitrary = elements [PAY, COLLECT]
-
-$(deriveSerialize ''TransactionType)
-$(makeStore ''TransactionType)
-
-data TransactionStatus
-    = SUCCESS
-    | FAILURE
-    | PENDING
-    | EXPIRED
-    | DECLINED
-    | TIMED_OUT
-    | DEEMED
-    | COLLECT_PAY_INITIATED
-    | DECLINE_INITIATED
-    | REVERSED
-    | NOT_FOUND
-    deriving (Generic, Show, Eq, Ord, Read, Enum)
-
-instance Arbitrary TransactionStatus where
-    arbitrary =
-        elements
-            [ SUCCESS
-            , FAILURE
-            , PENDING
-            , EXPIRED
-            , DECLINED
-            , TIMED_OUT
-            , DEEMED
-            , COLLECT_PAY_INITIATED
-            , DECLINE_INITIATED
-            , REVERSED
-            , NOT_FOUND
-            ]
-
-$(deriveSerialize ''TransactionStatus)
-$(makeStore ''TransactionStatus)
-
-data TransactionChannel
-    = USSD
-    | ANDROID
-    | IOS
-    | SDK
-    deriving (Generic, Show, Eq, Ord, Read, Enum)
-
-instance Arbitrary TransactionChannel where
-    arbitrary = elements [USSD, ANDROID, IOS, SDK]
-
-$(deriveSerialize ''TransactionChannel)
-$(makeStore ''TransactionChannel)
-
-data TransactionCallbackStatus
-    = CALLBACK_SUCCESS
-    | CALLBACK_FAILURE
-    | CALLBACK_PENDING
-    | CALLBACK_UNINITIATED
-    | CALLBACK_DEEMED
-    deriving (Generic, Show, Eq, Ord, Read, Enum)
-
-instance Arbitrary TransactionCallbackStatus where
-    arbitrary =
-        elements
-            [ CALLBACK_SUCCESS
-            , CALLBACK_FAILURE
-            , CALLBACK_PENDING
-            , CALLBACK_UNINITIATED
-            , CALLBACK_DEEMED
-            ]
-
-$(deriveSerialize ''TransactionCallbackStatus)
-$(makeStore ''TransactionCallbackStatus)
-
-data CollectType
-    = TRANSACTION
-    | MANDATE
-    deriving (Generic, Show, Eq, Ord, Read, Enum)
-
-instance Arbitrary CollectType where
-    arbitrary = elements [TRANSACTION, MANDATE]
-
-$(deriveSerialize ''CollectType)
-$(makeStore ''CollectType)
-
--- add more fields if required to PayerInfo
-data PayerInfo  =
-  PayerInfo
-    { _accountNumber :: !(Maybe Text)
-    , _accountNumberHash :: !(Maybe Text)
-    , _ifsc :: !(Maybe Text)
-    , _accountHash :: !(Maybe Text)
-    , _bankIIN :: !(Maybe Text)
-    , _maskedAccountNumber :: !(Maybe Text)
-    , _payerNumber :: !(Maybe Text)
-    , _payerNumberHash :: !(Maybe Text)
-    , _payerName :: !(Maybe Text)
-    , _payerNameHash :: !(Maybe Text)
-    , _payerMobileNumber :: !(Maybe Text)
-    , _payerMobileNumberHash :: !(Maybe Text)
-    , _upiNumber :: !(Maybe Text)
-    , _upiNumberHash :: !(Maybe Text)
-    , _someDum :: !(Maybe Text)
-    } deriving (Show, Eq, Generic, Ord)
-
-$(deriveSerialize ''PayerInfo)
-$(makeStore ''PayerInfo)
-
-instance Arbitrary PayerInfo where
-    arbitrary =
-        PayerInfo <$> (Just <$> arbitrary) <*> (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary)
-
--- add more fields if required to PayeeInfo
-data PayeeInfo  =
-  PayeeInfo
-    { _vpa :: !(Maybe Text)
-    , _vpaHash :: !(Maybe Text)
-    , _isVerifiedPayee :: !(Maybe Bool)
-    , _name :: !(Maybe Text)
-    , _nameHash :: !(Maybe Text)
-    , _mobileNumber :: !(Maybe Text)
-    , _mobileNumberHash :: !(Maybe Text)
-    , _isMarkedSpam :: !(Maybe Bool)
-    , _upiNumber :: !(Maybe Text)
-    , _upiNumberHash :: !(Maybe Text)
-    , _maskedAccountNumber :: !(Maybe Text)
-    , _bankIIN :: !(Maybe Text)
-    } deriving (Show, Eq, Generic, Ord)
-
-$(deriveSerialize ''PayeeInfo)
-$(makeStore ''PayeeInfo)
-
-instance Arbitrary PayeeInfo where
-    arbitrary =
-        PayeeInfo <$> (Just <$> arbitrary) <*> (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary)
-
--- add more fields if required to NpciResponse
-data NpciResponse  =
-  NpciResponse
-    { _error :: !(Maybe Bool)
-    , _code :: !(Maybe Text)
-    , _result :: !Text
-    , _note :: !(Maybe Text)
-    , _errCode :: !(Maybe Text)
-    , _errorCode :: !(Maybe Text)
-    , _userMessage :: !(Maybe Text)
-    , _sherlockError :: !(Maybe Bool)
-    , _orgErrCode :: !(Maybe Text)
-    , _orgStatus :: !(Maybe Text)
-    } deriving (Show, Eq, Generic, Ord)
-
-instance Arbitrary NpciResponse where
-    arbitrary =
-        NpciResponse <$> (Just <$> arbitrary) <*> (Just <$> arbitrary) <*>
-        arbitrary <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary)
-
-$(deriveSerialize ''NpciResponse)
-$(makeStore ''NpciResponse)
-
--- add more fields if required to TxnInfo
-data TxnInfo  =
-  TxnInfo
-    { _payType :: !Text              -- "payType"
-    , _udfParameters :: !(Maybe Text)
-    , _merchantRequestId :: !(Maybe Text)
-    , _merchantCustomerId :: !(Maybe Text)
-    -- The following fields are wildly unchecked, and additional
-    -- fields may be missing.
-    -- (JSON field names from DB are labeled in quotes.)
-    , _tiEntity :: !(Maybe Text)         -- "mc"
-    , _tiPayeeAddress :: !(Maybe Text)   -- "pa"
-    , _tiPayeeAddressHash :: !(Maybe Text)   -- "hashed pa"
-    , _tiPayeeName :: !(Maybe Text)      -- "pn"
-    , _tiPayeeNameHash :: !(Maybe Text)      -- "hashed pn"
-    , _tiPayeeMcc :: !(Maybe Text)       -- "mc"
-    , _tiTxnRef :: !(Maybe Text)         -- "tr"
-    , _tiTxnNote :: !(Maybe Text)        -- "tn"
-    , _tiTxnMinimumAmount :: !(Maybe Text) -- "mam"
-    , _tiRefUrl :: !(Maybe Text)         -- "url"
-    , _tiPayeeCurency :: !(Maybe Text)   -- "curr"
-    , _tiMerchantRequestId :: !(Maybe Text) -- "mr"
-    , _tiRiskScore :: !(Maybe Text) -- "riskScore"
-    , _tiCode :: !(Maybe Text)
-    , _tpvRefFailed :: !(Maybe Bool)
-    } deriving (Show, Eq, Generic, Ord)
-
-$(deriveSerialize ''TxnInfo)
-$(makeStore ''TxnInfo)
-
-instance Arbitrary TxnInfo where
-    arbitrary =
-        TxnInfo <$> arbitrary <*> (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary)
-
-data Transaction  = Transaction
-  { _id :: !Text
-  , _mode :: !TransactionMode
-  , __type :: !TransactionType
-  , _myval :: !(Maybe Text)
-  , _amount :: !Double
-  , _expiry :: !(Maybe LocalTime)
-  , _status :: !TransactionStatus
-  , _channel :: !(Maybe TransactionChannel)
-  , _purpose :: !(Maybe Text)
-  , _remarks :: !Text
-  , _txnInfo :: !(Maybe TxnInfo)
-  , _currency :: !Text
-  , _payeeVpa :: !(Maybe Text)
-  , _payerVpa :: !(Maybe Text)
-  , _upiMsgId :: !(Maybe Text)
-  , _createdAt :: !LocalTime
-  , _payeeInfo :: !(Maybe PayeeInfo)
-  , _payerInfo :: !(Maybe PayerInfo)
-  , _seqNumber :: !(Maybe Int)
-  , _updatedAt :: !LocalTime
-  , __MandateId :: !(Maybe Text)
-  , __CustomerId :: !(Maybe Text)
-  , __MerchantId :: !(Maybe Text)
-  , _completedAt :: !(Maybe LocalTime)
-  , _callbackSent :: !(Maybe Bool)
-  , _npciResponse :: !(Maybe NpciResponse)
-  , _payeeVpaHash :: !(Maybe Text)
-  , _payerVpaHash :: !(Maybe Text)
-  , _upiRequestId :: !Text
-  , _selfInitiated :: !(Maybe Bool)
-  , _upiResponseId :: !(Maybe Text)
-  , _callbackStatus :: !(Maybe TransactionCallbackStatus)
-  , _initiationMode :: !(Maybe Text)
-  , __MerchantCustomerId :: !(Maybe Text)
-  } deriving (Generic, Show, Eq)
-
-$(deriveSerialize ''Transaction)
-$(makeStore ''Transaction)
-
--- $(RecordTH.deriveSerialize ''Transaction)
--- $(JInternal.makeJStore ''Transaction)
-
-instance Arbitrary Transaction where
-    arbitrary =
-        Transaction <$> arbitrary <*> arbitrary <*>
-        arbitrary <*>
-        (Just <$> arbitrary) <*>
-        arbitrary <*>
-        (Just <$> arbitrary) <*>
-        arbitrary <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        arbitrary <*>
-        (Just <$> arbitrary) <*>
-        arbitrary <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        arbitrary <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        arbitrary <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        arbitrary <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary) <*>
-        (Just <$> arbitrary)
-
-
--------------------------------------------------------------------------------
 -- Benchmarks
 -------------------------------------------------------------------------------
 
+{-
 -- XXX Why forall?
 {-# INLINE benchConst #-}
 benchConst ::
@@ -967,6 +547,7 @@ benchVar gname gtSize f tInt lInt times =
         , let !n = gtSize lInt
            in benchSink "list-int" times (f n lInt)
         ]
+-}
 
 {-# INLINE benchTransaction #-}
 benchTransaction ::
@@ -988,10 +569,10 @@ benchTransaction gname gtSize f transaction times =
 allBenchmarks :: Int -> [Benchmark]
 allBenchmarks times =
 #else
-allBenchmarks :: BinTree Int -> [Int] -> Transaction -> Int -> [Benchmark]
+allBenchmarks :: a -> [Int] -> Transaction -> Int -> [Benchmark]
 allBenchmarks tInt lInt transaction times =
 #endif
-    [ bgroup "sizeOf"
+    [ {- bgroup "sizeOf"
         [
 #ifndef USE_UNBOX
           bench "bintree-int" $ nf getSize tInt
@@ -999,17 +580,20 @@ allBenchmarks tInt lInt transaction times =
 #endif
         ]
 
-    , bgroup "Serialize"
-      [ benchConst "poke" getSize (const pokeTimes) times
+    , -} bgroup "Serialize"
+      [ {-benchConst "poke" getSize (const pokeTimes) times
       , benchConst "pokeWithSize" getSize (const pokeTimesWithSize) times
       , benchConst "peek" getSize peekTimes times
       , benchConst "roundtrip" getSize (const roundtrip) times
+      -}
 #ifndef USE_UNBOX
+      {-
       , benchVar "poke" getSize (const pokeTimes) tInt lInt 1
       , benchVar "pokeWithSize" getSize (const pokeTimesWithSize) tInt lInt 1
       , benchVar "peek" getSize peekTimes tInt lInt 1
       , benchVar "roundtrip" getSize (const roundtrip) tInt lInt 1
-      , benchTransaction "poke" getSize (const pokeTimes) transaction (times `div` 25)
+      -}
+        benchTransaction "poke" getSize (const pokeTimes) transaction (times `div` 25)
       , benchTransaction "pokeWithSize" getSize (const pokeTimesWithSize) transaction (times `div` 25)
       , benchTransaction "peek" getSize peekTimes transaction (times `div` 25)
       , benchTransaction "roundtrip" getSize (const roundtrip) transaction (times `div` 25)
@@ -1017,19 +601,22 @@ allBenchmarks tInt lInt transaction times =
 #endif
 
     , bgroup "Store"
-      [ benchConst "poke" Store.getSize (const pokeTimesStore) times
+      [ {- benchConst "poke" Store.getSize (const pokeTimesStore) times
       , benchConst "pokeWithSize" Store.getSize (const pokeTimesWithSizeStore) times
       , benchConst "peek" Store.getSize peekTimesStore times
       , benchConst "roundtrip" Store.getSize (const roundtripStore) times
+      -}
 #ifndef USE_UNBOX
+      {-
       , benchVar "poke" Store.getSize (const pokeTimesStore) tInt lInt 1
       , benchVar "pokeWithSize" Store.getSize (const pokeTimesWithSizeStore) tInt lInt 1
       , benchVar "peek" Store.getSize peekTimesStore tInt lInt 1
       , benchVar "roundtrip" Store.getSize (const roundtripStore) tInt lInt 1
-      , benchTransaction "poke" Store.getSize (const pokeTimesStore) transaction (times `div` 25)
+        benchTransaction "poke" Store.getSize (const pokeTimesStore) transaction (times `div` 25)
       , benchTransaction "pokeWithSize" Store.getSize (const pokeTimesWithSizeStore) transaction (times `div` 25)
       , benchTransaction "peek" Store.getSize peekTimesStore transaction (times `div` 25)
       , benchTransaction "roundtrip" Store.getSize (const roundtripStore) transaction (times `div` 25)
+      -}
       ]
 #endif
     ]
@@ -1044,15 +631,16 @@ main = do
     -- Approximately 100000 constructors
     -- Assuming Leaf nodes constitute two constructors (Leaf, Int) and internal
     -- nodes 1 level = log_2 (100001/3) + 1 = 16
-    !(tInt :: BinTree Int) <- force <$> mkBinTree 16
+    -- !(tInt :: BinTree Int) <- force <$> mkBinTree 16
 
     -- Approximately 100000 constructors, assuming two constructors (Cons, Int)
     -- per element.
-    let lInt = [1..50000 :: Int]
-    let !len = length lInt -- evaluate the list
-
+    -- let lInt = [1..50000 :: Int]
+    -- let !len = length lInt -- evaluate the list
 
     !(transaction :: Transaction) <- generate arbitrary
+    -- Make sure we evaluate transaction once before using it
+    -- pokeTimes transaction 1
     -- print transaction
     -- undefined
 #endif
@@ -1062,7 +650,7 @@ main = do
 #ifdef USE_UNBOX
     runWithCLIOpts defaultStreamSize allBenchmarks
 #else
-    len `seq` runWithCLIOpts defaultStreamSize (allBenchmarks tInt lInt transaction)
+    runWithCLIOpts defaultStreamSize (allBenchmarks undefined undefined transaction)
 #endif
 #else
     -- Enable FUSION_CHECK macro at the beginning of the file
@@ -1079,9 +667,12 @@ main = do
     -- peekTimes (Sum2525) value
     -- peekTimes (Product25 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25) value
     -- peekTimes tInt 1
-    let !n = getSize lInt
-    peekTimes n lInt 1
+    -- let !n = getSize lInt
+    -- peekTimes n lInt 1
 
+    -- let !n = getSize transaction
+    -- putStrLn $ "size = " ++ show n
+    peekTimes 1 transaction 1
     -- roundtrip ((CDT1C2 (5 :: Int)) :: CustomDT1) value
     return ()
 #endif
