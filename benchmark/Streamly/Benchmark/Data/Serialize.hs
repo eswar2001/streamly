@@ -494,6 +494,7 @@ roundtrip val times = loop times trip val
 -- Store Helpers
 -------------------------------------------------------------------------------
 
+{-
 {-# INLINE pokeWithSizeStore #-}
 pokeWithSizeStore :: forall a. Store a => PokeState -> a -> IO ()
 pokeWithSizeStore ps val = do
@@ -508,11 +509,11 @@ pokeTimesWithSizeStore val times = do
         ps <- unsafeMakePokeState ptr (pure ptr)
         loopWith times pokeWithSizeStore ps val
     pure ()
+-}
 
 {-# INLINE pokeStore #-}
 pokeStore :: Store a => PokeState -> a -> IO ()
-pokeStore ps val = do
-    runPoke (Store.poke val) ps 0 >> return ()
+pokeStore ps val = runPoke (Store.poke val) ps 0 >> return ()
 
 {-# INLINE pokeTimesStore #-}
 pokeTimesStore :: Store a => a -> Int -> IO ()
@@ -522,6 +523,19 @@ pokeTimesStore val times = do
         ps <- unsafeMakePokeState ptr (pure ptr)
         loopWith times pokeStore ps val
     pure ()
+
+{-# INLINE encodeStore #-}
+encodeStore :: forall a. Store a => a -> IO ()
+encodeStore val = do
+    let n = Store.getSize val
+    BS.create n $ \ptr -> do
+        ps <- unsafeMakePokeState ptr (pure ptr)
+        runPoke (Store.poke val) ps 0 >> pure ()
+    pure ()
+
+{-# INLINE encodeTimesStore #-}
+encodeTimesStore :: Store a => a -> Int -> IO ()
+encodeTimesStore val times = loop times encodeStore val
 
 {-# INLINE peekStore #-}
 peekStore :: forall a. (Eq a, Store a) => a -> ByteString -> IO ()
@@ -624,8 +638,8 @@ benchVar gname gtSize f tInt lInt times =
 {-# INLINE benchTransaction #-}
 benchTransaction ::
        String
-    -> (forall a. (Eq a, SERIALIZE_CLASS a, Store a, Show a) => a -> Int)
-    -> (forall a. (Eq a, SERIALIZE_CLASS a, Store a, Show a) => Int -> a -> Int -> IO ())
+    -> (forall a. (NFData a, Eq a, SERIALIZE_CLASS a, Store a, Show a) => a -> Int)
+    -> (forall a. (NFData a, Eq a, SERIALIZE_CLASS a, Store a, Show a) => Int -> a -> Int -> IO ())
     -> Transaction
     -> Int
     -> Benchmark
@@ -652,22 +666,23 @@ allBenchmarks tInt lInt transaction times =
 #endif
         ]
 
-    , -} bgroup "Serialize"
-      [ benchConst "poke" getSize (const pokeTimes) times
+    ,
+-}
+    bgroup "Serialize"
+      [ {- benchConst "poke" getSize (const pokeTimes) times
       -- , benchConst "pokeWithSize" getSize (const pokeTimesWithSize) times
       , benchConst "encode" (const encodeTimes) times
       , benchConst "peek" getSize peekTimes times
       , benchConst "roundtrip" getSize (const roundtrip) times
 #ifndef USE_UNBOX
-      {-
       , benchVar "poke" getSize (const pokeTimes) tInt lInt 1
       -- , benchVar "pokeWithSize" getSize (const pokeTimesWithSize) tInt lInt 1
       , benchVar "encode" (const encodeTimes) tInt lInt 1
       , benchVar "peek" getSize peekTimes tInt lInt 1
       , benchVar "roundtrip" getSize (const roundtrip) tInt lInt 1
-      -}
+-}
         benchTransaction "poke" getSize (const pokeTimes) transaction (times `div` 25)
-      , benchTransaction "pokeWithSize" getSize (const pokeTimesWithSize) transaction (times `div` 25)
+      , benchTransaction "encode" getSize (const encodeTimes) transaction (times `div` 25)
       , benchTransaction "peek" getSize peekTimes transaction (times `div` 25)
       , benchTransaction "roundtrip" getSize (const roundtrip) transaction (times `div` 25)
       ]
@@ -675,21 +690,19 @@ allBenchmarks tInt lInt transaction times =
 
     , bgroup "Store"
       [ {- benchConst "poke" Store.getSize (const pokeTimesStore) times
-      , benchConst "pokeWithSize" Store.getSize (const pokeTimesWithSizeStore) times
+      , benchConst "encode" Store.getSize (const encodeTimesStore) times
       , benchConst "peek" Store.getSize peekTimesStore times
       , benchConst "roundtrip" Store.getSize (const roundtripStore) times
-      -}
 #ifndef USE_UNBOX
-      {-
       , benchVar "poke" Store.getSize (const pokeTimesStore) tInt lInt 1
-      , benchVar "pokeWithSize" Store.getSize (const pokeTimesWithSizeStore) tInt lInt 1
+      , benchVar "encode" Store.getSize (const encodeTimesStore) tInt lInt 1
       , benchVar "peek" Store.getSize peekTimesStore tInt lInt 1
       , benchVar "roundtrip" Store.getSize (const roundtripStore) tInt lInt 1
+-}
         benchTransaction "poke" Store.getSize (const pokeTimesStore) transaction (times `div` 25)
-      , benchTransaction "pokeWithSize" Store.getSize (const pokeTimesWithSizeStore) transaction (times `div` 25)
+      , benchTransaction "encode" Store.getSize (const encodeTimesStore) transaction (times `div` 25)
       , benchTransaction "peek" Store.getSize peekTimesStore transaction (times `div` 25)
       , benchTransaction "roundtrip" Store.getSize (const roundtripStore) transaction (times `div` 25)
-      -}
       ]
 #endif
     ]
