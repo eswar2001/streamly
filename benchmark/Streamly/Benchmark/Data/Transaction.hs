@@ -218,6 +218,10 @@ data TransactionMode
     | UPI
     deriving (Generic, Show, Eq, Ord, Read, Enum)
 
+instance NFData TransactionMode where
+    {-# INLINE rnf #-}
+    rnf _ = ()
+
 instance Arbitrary TransactionMode where
     arbitrary = elements [IFSC, UPI]
 
@@ -228,6 +232,10 @@ data TransactionType
     = PAY
     | COLLECT
     deriving (Generic, Show, Eq, Ord, Read, Enum)
+
+instance NFData TransactionType where
+    {-# INLINE rnf #-}
+    rnf _ = ()
 
 instance Arbitrary TransactionType where
     arbitrary = elements [PAY, COLLECT]
@@ -248,6 +256,10 @@ data TransactionStatus
     | REVERSED
     | NOT_FOUND
     deriving (Generic, Show, Eq, Ord, Read, Enum)
+
+instance NFData TransactionStatus where
+    {-# INLINE rnf #-}
+    rnf _ = ()
 
 instance Arbitrary TransactionStatus where
     arbitrary =
@@ -275,6 +287,10 @@ data TransactionChannel
     | SDK
     deriving (Generic, Show, Eq, Ord, Read, Enum)
 
+instance NFData TransactionChannel where
+    {-# INLINE rnf #-}
+    rnf _ = ()
+
 instance Arbitrary TransactionChannel where
     arbitrary = elements [USSD, ANDROID, IOS, SDK]
 
@@ -288,6 +304,10 @@ data TransactionCallbackStatus
     | CALLBACK_UNINITIATED
     | CALLBACK_DEEMED
     deriving (Generic, Show, Eq, Ord, Read, Enum)
+
+instance NFData TransactionCallbackStatus where
+    {-# INLINE rnf #-}
+    rnf _ = ()
 
 instance Arbitrary TransactionCallbackStatus where
     arbitrary =
@@ -306,6 +326,10 @@ data CollectType
     = TRANSACTION
     | MANDATE
     deriving (Generic, Show, Eq, Ord, Read, Enum)
+
+instance NFData CollectType where
+    {-# INLINE rnf #-}
+    rnf _ = ()
 
 instance Arbitrary CollectType where
     arbitrary = elements [TRANSACTION, MANDATE]
@@ -332,6 +356,23 @@ data PayerInfo  =
     , _upiNumberHash :: !(Maybe Text)
     , _someDum :: !(Maybe Text)
     } deriving (Show, Eq, Generic, Ord)
+
+instance NFData PayerInfo where
+    {-# INLINE rnf #-}
+    rnf (PayerInfo {..}) =
+        rnf _accountNumber `seq`
+        rnf _accountNumberHash `seq`
+        rnf _ifsc `seq`
+        rnf _accountHash `seq`
+        rnf _bankIIN `seq`
+        rnf _maskedAccountNumber `seq`
+        rnf _payerNumber `seq`
+        rnf _payerNumberHash `seq`
+        rnf _payerName `seq`
+        rnf _payerNameHash `seq`
+        rnf _payerMobileNumber `seq`
+        rnf _payerMobileNumberHash `seq`
+        rnf _upiNumber `seq` rnf _upiNumberHash `seq` rnf _someDum
 
 $(deriveSerialize ''PayerInfo)
 $(makeStore ''PayerInfo)
@@ -370,6 +411,20 @@ data PayeeInfo  =
     , _bankIIN :: !(Maybe Text)
     } deriving (Show, Eq, Generic, Ord)
 
+instance NFData PayeeInfo where
+    {-# INLINE rnf #-}
+    rnf (PayeeInfo {..}) =
+        rnf _vpa `seq`
+        rnf _vpaHash `seq`
+        rnf _isVerifiedPayee `seq`
+        rnf _name `seq`
+        rnf _nameHash `seq`
+        rnf _mobileNumber `seq`
+        rnf _mobileNumberHash `seq`
+        rnf _isMarkedSpam `seq`
+        rnf _upiNumber `seq`
+        rnf _upiNumberHash `seq` rnf _maskedAccountNumber `seq` rnf _bankIIN
+
 $(deriveSerialize ''PayeeInfo)
 $(makeStore ''PayeeInfo)
 
@@ -401,6 +456,18 @@ data NpciResponse  =
     , _orgErrCode :: !(Maybe Text)
     , _orgStatus :: !(Maybe Text)
     } deriving (Show, Eq, Generic, Ord)
+
+instance NFData NpciResponse where
+    {-# INLINE rnf #-}
+    rnf (NpciResponse {..}) =
+        rnf _error `seq`
+        rnf _code `seq`
+        rnf _result `seq`
+        rnf _note `seq`
+        rnf _errCode `seq`
+        rnf _errorCode `seq`
+        rnf _userMessage `seq`
+        rnf _sherlockError `seq` rnf _orgErrCode `seq` rnf _orgStatus
 
 instance Arbitrary NpciResponse where
     arbitrary =
@@ -443,6 +510,27 @@ data TxnInfo  =
     , _tiCode :: !(Maybe Text)
     , _tpvRefFailed :: !(Maybe Bool)
     } deriving (Show, Eq, Generic, Ord)
+
+instance NFData TxnInfo where
+    {-# INLINE rnf #-}
+    rnf (TxnInfo {..}) =
+        rnf _payType `seq`
+        rnf _udfParameters `seq`
+        rnf _merchantRequestId `seq`
+        rnf _merchantCustomerId `seq`
+        rnf _tiEntity `seq`
+        rnf _tiPayeeAddress `seq`
+        rnf _tiPayeeAddressHash `seq`
+        rnf _tiPayeeName `seq`
+        rnf _tiPayeeNameHash `seq`
+        rnf _tiPayeeMcc `seq`
+        rnf _tiTxnRef `seq`
+        rnf _tiTxnNote `seq`
+        rnf _tiTxnMinimumAmount `seq`
+        rnf _tiRefUrl `seq`
+        rnf _tiPayeeCurency `seq`
+        rnf _tiMerchantRequestId `seq`
+        rnf _tiRiskScore `seq` rnf _tiCode `seq` rnf _tpvRefFailed
 
 $(deriveSerialize ''TxnInfo)
 $(makeStore ''TxnInfo)
@@ -546,3 +634,39 @@ instance Arbitrary Transaction where
         arbitrary <*>
         arbitrary <*>
         (Just <$> arbitrary)
+
+instance NFData Transaction where
+    {-# INLINE rnf #-}
+    rnf (Transaction {..}) =
+        rnf _id `seq`
+        rnf _payerVpa `seq`
+        rnf _payerVpaHash `seq`
+        rnf _payeeVpa `seq`
+        rnf _payeeVpaHash `seq`
+        rnf _payerInfo `seq`
+        rnf _payeeInfo `seq`
+        rnf _txnInfo `seq`
+        rnf _selfInitiated `seq`
+        rnf _mode `seq`
+        rnf _amount `seq`
+        rnf _upiRequestId `seq`
+        rnf __type `seq`
+        rnf _status `seq`
+        rnf _upiMsgId `seq`
+        rnf _npciResponse `seq`
+        rnf _remarks `seq`
+        rnf _expiry `seq`
+        rnf _currency `seq`
+        rnf _upiResponseId `seq`
+        rnf __CustomerId `seq`
+        rnf __MerchantId `seq`
+        rnf __MerchantCustomerId `seq`
+        rnf _channel `seq`
+        rnf _callbackSent `seq`
+        rnf _callbackStatus `seq`
+        rnf _completedAt `seq`
+        rnf _initiationMode `seq`
+        rnf _purpose `seq`
+        rnf __MandateId `seq`
+        rnf _seqNumber `seq`
+        rnf _createdAt `seq` rnf _updatedAt `seq` rnf _myval
