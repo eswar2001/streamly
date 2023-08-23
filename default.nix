@@ -8,7 +8,7 @@
     import (builtins.fetchTarball
       https://github.com/NixOS/nixpkgs/archive/refs/tags/22.05.tar.gz)
         {}
-, compiler ? "default"
+, compiler ? "ghc922"
 , c2nix ? "" # cabal2nix CLI options
 # TODO
 #, sources ? [] # e.g. [./. ./benchmark]
