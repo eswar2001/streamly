@@ -11,6 +11,17 @@
 module Streamly.Internal.Data.Serialize.TH
     ( deriveSerialize
     , deriveSerializeWith
+    , mkDeserializeExprOne
+    , mkSerializeExprFields
+    , matchConstructor
+    , openConstructor
+    , Field
+    , _endOffset
+    , _initialOffset
+    , _arr
+    , makeI
+    , _val
+    , mkFieldName
     ) where
 
 --------------------------------------------------------------------------------
@@ -72,12 +83,13 @@ makeA i = mkName $ "a" ++ show i
 -- Domain specific helpers
 --------------------------------------------------------------------------------
 
+openConstructor :: Name -> Int -> Q Pat
+openConstructor cname numFields =
+    conP cname (map varP (map mkFieldName [0 .. (numFields - 1)]))
+
 matchConstructor :: Name -> Int -> Q Exp -> Q Match
 matchConstructor cname numFields exp0 =
-    match
-        (conP cname (map varP (map mkFieldName [0 .. (numFields - 1)])))
-        (normalB exp0)
-        []
+    match (openConstructor cname numFields) (normalB exp0) []
 
 exprGetSize :: Q Exp -> (Int, Type) -> Q Exp
 exprGetSize acc (i, ty) =
@@ -171,8 +183,8 @@ mkSizeOfExpr headTy constructors =
 -- Peek
 --------------------------------------------------------------------------------
 
-mkDeserializeExprOne :: DataCon -> Q Exp
-mkDeserializeExprOne (DataCon cname _ _ fields) =
+mkDeserializeExprOne :: Name -> DataCon -> Q Exp
+mkDeserializeExprOne deserializeFunc (DataCon cname _ _ fields) =
     case fields of
         -- Only tag is serialized for unit fields, no actual value
         [] -> [|pure ($(varE (mkName "i0")), $(conE cname))|]
@@ -197,7 +209,7 @@ mkDeserializeExprOne (DataCon cname _ _ fields) =
     makeBind i =
         bindS
             (tupP [varP (makeI (i + 1)), varP (makeA i)])
-            [|deserialize $(varE (makeI i)) $(varE _arr) $(varE _endOffset)|]
+            [|$(varE deserializeFunc) $(varE (makeI i)) $(varE _arr) $(varE _endOffset)|]
 
 
 mkDeserializeExpr :: Type -> [DataCon] -> Q Exp
@@ -214,7 +226,7 @@ mkDeserializeExpr headTy cons =
         [con] ->
             letE
                 [valD (varP (mkName "i0")) (normalB (varE _initialOffset)) []]
-                (mkDeserializeExprOne con)
+                (mkDeserializeExprOne 'deserialize con)
         -- Sum type
         _ ->
             doE
@@ -230,7 +242,7 @@ mkDeserializeExpr headTy cons =
     lenCons = length cons
     tagType = getTagType lenCons
     peekMatch (i, con) =
-        match (litP (IntegerL i)) (normalB (mkDeserializeExprOne con)) []
+        match (litP (IntegerL i)) (normalB (mkDeserializeExprOne 'deserialize con)) []
     peekErr =
         match
             wildP
@@ -252,8 +264,8 @@ mkSerializeExprTag tagType tagVal =
           $(varE _arr)
           $((sigE (litE (IntegerL (fromIntegral tagVal))) (conT tagType)))|]
 
-mkSerializeExprFields :: [Field] -> Q Exp
-mkSerializeExprFields fields =
+mkSerializeExprFields :: Name -> [Field] -> Q Exp
+mkSerializeExprFields serializeFunc fields =
     case fields of
         -- Unit constructor, do nothing just tag is enough
         [] -> [|pure ($(varE (mkName "i0")))|]
@@ -266,7 +278,7 @@ mkSerializeExprFields fields =
     makeBind i =
         bindS
             (varP (makeI (i + 1)))
-            [|serialize $(varE (makeI i)) $(varE _arr) $(varE (mkFieldName i))|]
+            [|$(varE serializeFunc) $(varE (makeI i)) $(varE _arr) $(varE (mkFieldName i))|]
 
 mkSerializeExpr :: Type -> [DataCon] -> Q Exp
 mkSerializeExpr headTy cons =
@@ -286,7 +298,7 @@ mkSerializeExpr headTy cons =
                      [ matchConstructor
                            cname
                            (length fields)
-                           (mkSerializeExprFields fields)
+                           (mkSerializeExprFields 'serialize fields)
                      ])
         -- Sum type
         _ ->
@@ -299,7 +311,7 @@ mkSerializeExpr headTy cons =
                               (doE [ bindS
                                          (varP (mkName "i0"))
                                          (mkSerializeExprTag tagType tagVal)
-                                   , noBindS (mkSerializeExprFields fields)
+                                   , noBindS (mkSerializeExprFields 'serialize fields)
                                    ]))
                      (zip [0 ..] cons))
   where

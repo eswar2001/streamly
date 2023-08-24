@@ -698,11 +698,11 @@ allBenchmarks tInt lInt transaction times =
       , benchVar "encode" Store.getSize (const encodeTimesStore) tInt lInt 1
       , benchVar "peek" Store.getSize peekTimesStore tInt lInt 1
       , benchVar "roundtrip" Store.getSize (const roundtripStore) tInt lInt 1
--}
         benchTransaction "poke" Store.getSize (const pokeTimesStore) transaction (times `div` 25)
       , benchTransaction "encode" Store.getSize (const encodeTimesStore) transaction (times `div` 25)
       , benchTransaction "peek" Store.getSize peekTimesStore transaction (times `div` 25)
       , benchTransaction "roundtrip" Store.getSize (const roundtripStore) transaction (times `div` 25)
+-}
       ]
 #endif
     ]

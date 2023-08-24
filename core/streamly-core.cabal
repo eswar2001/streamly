@@ -290,6 +290,8 @@ library
                      , Streamly.Internal.Data.Unbox.TH
                      , Streamly.Internal.Data.Serialize.TH
                      , Streamly.Internal.Data.Serialize.RecordTH
+                     , Streamly.Internal.Data.Serialize.RecordTH1
+                     , Streamly.Internal.Data.Serialize.RecordTH2
                      , Streamly.Internal.Data.Serialize.JInternal
 
                      -- Unboxed IORef

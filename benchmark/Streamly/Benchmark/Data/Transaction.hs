@@ -29,6 +29,7 @@ import Test.QuickCheck (oneof, elements, generate)
 import Streamly.Internal.Data.Unbox (newBytes, MutableByteArray)
 import Streamly.Internal.Data.Serialize
 import Streamly.Internal.Data.Serialize.TH
+import Streamly.Internal.Data.Serialize.RecordTH2
 
 import Gauge
 import Streamly.Benchmark.Common
@@ -593,10 +594,11 @@ data Transaction  = Transaction
   , _myval :: !(Maybe Text)
   } deriving (Generic, Show, Eq)
 
--- $(deriveSerialize ''Transaction)
+$(deriveSerialize ''Transaction)
 -- $(makeStore ''Transaction)
 
-$(RecordTH.deriveSerialize ''Transaction)
+-- $(deriveCompatSerialize ''Transaction)
+-- $(RecordTH.deriveSerialize ''Transaction)
 $(JInternal.makeJStore ''Transaction)
 
 instance Arbitrary Transaction where

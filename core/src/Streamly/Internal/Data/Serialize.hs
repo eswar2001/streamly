@@ -9,6 +9,7 @@
 module Streamly.Internal.Data.Serialize
     ( Size(..)
     , Serialize(..)
+    , CompactList(..)
     , encode
     , pinnedEncode
     , decode
@@ -205,6 +206,48 @@ DERIVE_SERIALIZE_FROM_UNBOX(Float)
 DERIVE_SERIALIZE_FROM_UNBOX((StablePtr a))
 DERIVE_SERIALIZE_FROM_UNBOX((Ptr a))
 DERIVE_SERIALIZE_FROM_UNBOX((FunPtr a))
+
+newtype CompactList a =
+    CompactList
+        { unCompactList :: [a]
+        }
+
+instance forall a. Serialize a => Serialize (CompactList a) where
+
+    -- {-# INLINE size #-}
+    size = Size $ \acc (CompactList xs) ->
+        case size :: Size a of
+            Size f -> foldl' f (acc + (Unbox.sizeOf (Proxy :: Proxy Word8))) xs
+
+    -- Inlining this causes large compilation times for tests
+    {-# INLINABLE deserialize #-}
+    deserialize off arr sz = do
+        (off1, len8) <- deserialize off arr sz :: IO (Int, Word8)
+        let len = (fromIntegral :: Word8 -> Int) len8
+        let
+            peekList f o i | i >= 3 = do
+              -- Unfold the loop three times
+              (o1, x1) <- deserialize o arr sz
+              (o2, x2) <- deserialize o1 arr sz
+              (o3, x3) <- deserialize o2 arr sz
+              peekList (f . (\xs -> x1:x2:x3:xs)) o3 (i - 3)
+            peekList f o 0 = pure (o, f [])
+            peekList f o i = do
+              (o1, x) <- deserialize o arr sz
+              peekList (f . (x:)) o1 (i - 1)
+        (nextOff, lst) <- peekList id off1 len
+        pure (nextOff, CompactList lst)
+
+    -- Inlining this causes large compilation times for tests
+    {-# INLINABLE serialize #-}
+    serialize off arr (CompactList val) = do
+        void $ serialize off arr ((fromIntegral :: Int -> Word8) (length val))
+        let off1 = off + Unbox.sizeOf (Proxy :: Proxy Word8)
+        let pokeList o [] = pure o
+            pokeList o (x:xs) = do
+              o1 <- serialize o arr x
+              pokeList o1 xs
+        pokeList off1 val
 
 instance forall a. Serialize a => Serialize [a] where
 
