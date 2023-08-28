@@ -12,7 +12,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
-module Transaction (Transaction) where
+module Transaction where
+
+
 
 -------------------------------------------------------------------------------
 -- Imports
@@ -375,7 +377,7 @@ instance NFData PayerInfo where
         rnf _payerMobileNumberHash `seq`
         rnf _upiNumber `seq` rnf _upiNumberHash `seq` rnf _someDum
 
-$(deriveSerialize ''PayerInfo)
+$(deriveCompatSerialize ''PayerInfo)
 $(makeStore ''PayerInfo)
 
 instance Arbitrary PayerInfo where
@@ -426,7 +428,7 @@ instance NFData PayeeInfo where
         rnf _upiNumber `seq`
         rnf _upiNumberHash `seq` rnf _maskedAccountNumber `seq` rnf _bankIIN
 
-$(deriveSerialize ''PayeeInfo)
+$(deriveCompatSerialize ''PayeeInfo)
 $(makeStore ''PayeeInfo)
 
 instance Arbitrary PayeeInfo where
@@ -482,7 +484,7 @@ instance Arbitrary NpciResponse where
         (Just <$> arbitrary) <*>
         (Just <$> arbitrary)
 
-$(deriveSerialize ''NpciResponse)
+$(deriveCompatSerialize ''NpciResponse)
 $(makeStore ''NpciResponse)
 
 -- add more fields if required to TxnInfo
@@ -533,7 +535,7 @@ instance NFData TxnInfo where
         rnf _tiMerchantRequestId `seq`
         rnf _tiRiskScore `seq` rnf _tiCode `seq` rnf _tpvRefFailed
 
-$(deriveSerialize ''TxnInfo)
+$(deriveCompatSerialize ''TxnInfo)
 $(makeStore ''TxnInfo)
 
 instance Arbitrary TxnInfo where
@@ -594,7 +596,7 @@ data Transaction  = Transaction
   , _myval :: !(Maybe Text)
   } deriving (Generic, Show, Eq)
 
-$(deriveSerialize ''Transaction)
+$(deriveCompatSerialize ''Transaction)
 -- $(makeStore ''Transaction)
 
 -- $(deriveCompatSerialize ''Transaction)
