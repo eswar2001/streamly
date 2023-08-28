@@ -397,7 +397,9 @@ mkDeserializeExpr initialOff endOff deserializeWithKeys con = do
          if hlen1 == $(litIntegral hlen)
              then if $(xorCmp hval hOff _arr)
                       then do
-                          let $(varP (makeI 0)) = $(litIntegral (hlen + 4 + 4))
+                          let $(varP (makeI 0)) =
+                                  $(varE initialOff) +
+                                  $(litIntegral (hlen + 4 + 4))
                           $(mkDeserializeExprOne 'deserializeWithSize con)
                       else $(varE deserializeWithKeys)
                                $(varE hOff)
