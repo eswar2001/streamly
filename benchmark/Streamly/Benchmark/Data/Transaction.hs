@@ -192,12 +192,12 @@ instance Serialize Text where
         -- XXX Check the available length in input buffer
         if (off1 + lenBytes <= end)
         then do
-            newArr <- Unbox.newBytes lenBytes
+            -- newArr <- Unbox.newBytes lenBytes
             -- XXX We can perform an unrolled word copy directly
-            Unbox.putSliceUnsafe arr off1 newArr 0 lenBytes
+            -- Unbox.putSliceUnsafe arr off1 newArr 0 lenBytes
             pure
                 ( off1 + lenBytes
-                , Text (TArr.Array (unsafeCoerce# (Unbox.getMutableByteArray# newArr))) 0 len16
+                , Text (TArr.Array (unsafeCoerce# (Unbox.getMutableByteArray# arr))) off1 len16
                 )
         else error $ "deserialize: Text: input buffer underflow: off1 = "
                 ++ show off1 ++ " lenBytes = " ++ show lenBytes
