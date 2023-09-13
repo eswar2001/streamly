@@ -7,6 +7,9 @@
 -- We are generating an orphan instance of Serialize for Identity.
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
+-- Required for testing compatibility
+{-# LANGUAGE DuplicateRecordFields #-}
+
 -- |
 -- Module      : Streamly.Test.Data.Serialize
 -- Copyright   : (c) 2022 Composewell technologies
@@ -28,11 +31,9 @@ import Streamly.Data.Serialize (Serialize)
 import Streamly.Test.Data.Serialize.TH (genDatatype)
 
 import qualified Streamly.Internal.Data.Serialize.TH as Serialize
-    ( deriveSerializeWith
-#ifdef ENABLE_constructorTagAsString
-    , Config(..)
-#endif
+    ( Config(..)
     , defaultConfig
+    , deriveSerializeWith
     )
 
 import Data.Functor.Identity (Identity (..))
@@ -116,6 +117,67 @@ instance Arbitrary a => Arbitrary (BinTree a) where
   arbitrary = oneof [Leaf <$> arbitrary, Tree <$> arbitrary <*> arbitrary]
 
 --------------------------------------------------------------------------------
+-- Record syntax type
+--------------------------------------------------------------------------------
+
+data RecordSyntaxType a =
+    RecordSyntaxType
+        { initialField :: Maybe String
+        , otherField :: a
+        , theLastField :: ()
+        }
+    deriving (Eq, Show)
+
+data RecordSyntaxTypeV2 a =
+    RecordSyntaxTypeV2
+        { initialField :: Maybe String
+        , otherField :: a
+        , theLastField :: ()
+        , theNewField :: Maybe Int
+        }
+    deriving (Eq, Show)
+
+data RecordSyntaxTypeV3 a =
+    RecordSyntaxTypeV3
+        { initialField :: Maybe String
+        , otherField :: a
+        }
+    deriving (Eq, Show)
+
+createNestedRecordSyntaxTypes ::
+       Maybe String
+    -> Maybe String
+    -> Int
+    -> ( RecordSyntaxType (RecordSyntaxType Int)
+       , RecordSyntaxTypeV2 (RecordSyntaxTypeV2 Int)
+       , RecordSyntaxTypeV3 (RecordSyntaxTypeV3 Int))
+createNestedRecordSyntaxTypes a b c =
+    ( RecordSyntaxType a (RecordSyntaxType b c ()) ()
+    , RecordSyntaxTypeV2 a (RecordSyntaxTypeV2 b c () Nothing) () Nothing
+    , RecordSyntaxTypeV3 a (RecordSyntaxTypeV3 b c))
+
+createNestedRecordSyntaxType ::
+       Maybe String
+    -> Maybe String
+    -> Int
+    -> RecordSyntaxType (RecordSyntaxType Int)
+createNestedRecordSyntaxType a b c =
+    let (v, _, _) = createNestedRecordSyntaxTypes a b c
+     in v
+
+$(Serialize.deriveSerializeWith
+      (Serialize.defaultConfig {Serialize.recordSyntaxWithHeader = True})
+      [d|instance Serialize a => Serialize (RecordSyntaxType a)|])
+
+$(Serialize.deriveSerializeWith
+      (Serialize.defaultConfig {Serialize.recordSyntaxWithHeader = True})
+      [d|instance Serialize a => Serialize (RecordSyntaxTypeV2 a)|])
+
+$(Serialize.deriveSerializeWith
+      (Serialize.defaultConfig {Serialize.recordSyntaxWithHeader = True})
+      [d|instance Serialize a => Serialize (RecordSyntaxTypeV3 a)|])
+
+--------------------------------------------------------------------------------
 -- Test helpers
 --------------------------------------------------------------------------------
 
@@ -164,6 +226,13 @@ roundtrip val = do
     res <- poke val
     peekAndVerify res val
 
+recordSyntaxCompatibility :: Maybe String -> Maybe String -> Int -> IO ()
+recordSyntaxCompatibility a b c = do
+    let (v1, v2, v3) = createNestedRecordSyntaxTypes a b c
+    res <- poke v1
+    peekAndVerify res v2
+    peekAndVerify res v3
+
 testSerializeList
     :: forall a. (Eq a, Show a, Serialize.Serialize a)
     => Int
@@ -203,6 +272,12 @@ testCases = do
 
     prop "Array Int"
         $ \(x :: [Int]) -> roundtrip (Array.fromList x)
+
+    prop "RecordSyntaxType"
+        $ \a b c -> roundtrip (createNestedRecordSyntaxType a b c)
+
+    prop "RecordSyntaxType - Compatibility"
+        $ \a b c -> recordSyntaxCompatibility a b c
 
     limitQC
         $ prop "CustomDatatype"
