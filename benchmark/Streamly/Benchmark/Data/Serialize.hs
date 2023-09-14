@@ -1,4 +1,5 @@
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE DuplicateRecordFields #-}
 
 #undef FUSION_CHECK
 #ifdef FUSION_CHECK
@@ -44,6 +45,10 @@ import Streamly.Internal.Data.Serialize.TH
 
 import Gauge
 import Streamly.Benchmark.Common
+
+#ifndef USE_UNBOX
+import Streamly.Benchmark.Data.Serialize.TH (genLargeRecords)
+#endif
 
 #ifdef USE_UNBOX
 #define SERIALIZE_CLASS Unbox
@@ -284,6 +289,20 @@ mkBinTree = go (generate $ arbitrary)
 #endif
 
 -------------------------------------------------------------------------------
+-- Large records
+-------------------------------------------------------------------------------
+
+#ifndef USE_UNBOX
+
+$(genLargeRecords "LargeRec" 50)
+$(deriveSerialize ''LargeRec_L)
+$(deriveSerializeWith
+      (defaultConfig {recordSyntaxWithHeader = True})
+      [d|instance Serialize LargeRec_R|])
+
+#endif
+
+-------------------------------------------------------------------------------
 -- Size helpers
 -------------------------------------------------------------------------------
 
@@ -474,6 +493,41 @@ benchVar gname f tInt lInt times =
         , let !n = getSize lInt
            in benchSink "list-int" times (f n lInt)
         ]
+
+{-
+{-# INLINE benchGeneric #-}
+benchGeneric
+    :: (NFData b, Serialize b)
+    => String
+    -> String
+    -> (forall a. (NFData a, Serialize a) =>
+        Int -> a -> Int -> IO ())
+    -> b
+    -> Int
+    -> Benchmark
+benchGeneric gname valId f val times =
+    bgroup gname
+       [ let !n = getSize val
+          in benchSink valId times (f n val)
+       ]
+-}
+
+{-# INLINE benchLargeRec #-}
+benchLargeRec ::
+        String
+    -> (forall a. (NFData a, Serialize a) =>
+        Int -> a -> Int -> IO ())
+    -> LargeRec_L
+    -> LargeRec_R
+    -> Int
+    -> Benchmark
+benchLargeRec gname f recL recR times =
+    bgroup gname
+       [ let !n = getSize recL
+           in benchSink "LargeRec_L" times (f n recL)
+       ,  let !n = getSize recR
+           in benchSink "LargeRec_R" times (f n recR)
+       ]
 #endif
 
 -- Times is scaled by the number of constructors to normalize
@@ -481,8 +535,9 @@ benchVar gname f tInt lInt times =
 allBenchmarks :: Int -> [Benchmark]
 allBenchmarks times =
 #else
-allBenchmarks :: BinTree Int -> [Int] -> Int -> [Benchmark]
-allBenchmarks tInt lInt times =
+allBenchmarks ::
+       BinTree Int -> [Int] -> LargeRec_L -> LargeRec_R -> Int -> [Benchmark]
+allBenchmarks tInt lInt recL recR times =
 #endif
     [ bgroup "sizeOf"
         [
@@ -502,6 +557,10 @@ allBenchmarks tInt lInt times =
     , benchVar "encode" (const encodeTimes) tInt lInt 1
     , benchVar "peek" peekTimes tInt lInt 1
     , benchVar "roundtrip" (const roundtrip) tInt lInt 1
+    , benchLargeRec "poke" (const pokeTimes) recL recR times
+    , benchLargeRec "encode" (const encodeTimes) recL recR times
+    , benchLargeRec "peek" peekTimes recL recR times
+    , benchLargeRec "roundtrip" (const roundtrip) recL recR times
 #endif
     ]
 
@@ -517,6 +576,9 @@ main = do
     -- nodes 1 level = log_2 (100001/3) + 1 = 16
     !(tInt :: BinTree Int) <- force <$> mkBinTree 16
 
+    !(recL :: LargeRec_L) <- generate arbitrary
+    let !recR = convert_LargeRec_L_to_LargeRec_R recL
+
     -- Approximately 100000 constructors, assuming two constructors (Cons, Int)
     -- per element.
     let lInt = [1..50000 :: Int]
@@ -528,7 +590,11 @@ main = do
 #ifdef USE_UNBOX
     runWithCLIOpts defaultStreamSize allBenchmarks
 #else
-    len `seq` runWithCLIOpts defaultStreamSize (allBenchmarks tInt lInt)
+    len
+        `seq` runWithCLIOpts
+                  defaultStreamSize
+                  (allBenchmarks tInt lInt recL recR)
+
 #endif
 #else
     -- Enable FUSION_CHECK macro at the beginning of the file
