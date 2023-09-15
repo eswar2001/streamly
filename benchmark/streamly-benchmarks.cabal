@@ -381,6 +381,8 @@ benchmark Data.Serialize
   main-is: Streamly/Benchmark/Data/Serialize.hs
   build-depends: QuickCheck, template-haskell
   other-modules: Streamly.Benchmark.Data.Serialize.TH
+  if flag(limit-build-mem)
+    ghc-options: +RTS -M1000M -RTS
 
 benchmark Data.Unfold
   import: bench-options
