@@ -7,9 +7,6 @@
 -- We are generating an orphan instance of Serialize for Identity.
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
--- Required for testing compatibility
-{-# LANGUAGE DuplicateRecordFields #-}
-
 -- |
 -- Module      : Streamly.Test.Data.Serialize
 -- Copyright   : (c) 2022 Composewell technologies
@@ -31,15 +28,14 @@ import Streamly.Data.Serialize (Serialize)
 import Streamly.Test.Data.Serialize.TH (genDatatype)
 
 import qualified Streamly.Internal.Data.Serialize.TH as Serialize
-    ( Config(..)
-    , defaultConfig
-    , deriveSerializeWith
-    )
 
 import Data.Functor.Identity (Identity (..))
 
 import qualified Streamly.Internal.Data.Array as Array
 import qualified Streamly.Internal.Data.Serialize as Serialize
+
+import qualified Streamly.Test.Data.Serialize.CompatV0 as CompatV0
+import qualified Streamly.Test.Data.Serialize.CompatV1 as CompatV1
 
 import Test.Hspec.QuickCheck
 import Test.QuickCheck
@@ -120,62 +116,42 @@ instance Arbitrary a => Arbitrary (BinTree a) where
 -- Record syntax type
 --------------------------------------------------------------------------------
 
-data RecordSyntaxType a =
-    RecordSyntaxType
-        { initialField :: Maybe String
-        , otherField :: a
-        , theLastField :: ()
+upgradeRec :: (a -> b) -> CompatV0.Rec a -> CompatV1.Rec b
+upgradeRec f val =
+    CompatV1.Rec
+        { CompatV1.initialField = CompatV0.initialField val
+        , CompatV1.otherField = f (CompatV0.otherField val)
+        , CompatV1.theLastField = CompatV0.theLastField val
+        , CompatV1.aNewField = Nothing
         }
-    deriving (Eq, Show)
 
-data RecordSyntaxTypeV2 a =
-    RecordSyntaxTypeV2
-        { initialField :: Maybe String
-        , otherField :: a
-        , theLastField :: ()
-        , theNewField :: Maybe Int
+upgradeRiver :: CompatV0.River -> CompatV1.River
+upgradeRiver = read . show
+
+downgradeRec  :: (a -> b) -> CompatV1.Rec a -> CompatV0.Rec b
+downgradeRec f val =
+    CompatV0.Rec
+        { CompatV0.initialField = CompatV1.initialField val
+        , CompatV0.otherField = f (CompatV1.otherField val)
+        , CompatV0.theLastField = CompatV1.theLastField val
         }
-    deriving (Eq, Show)
 
-data RecordSyntaxTypeV3 a =
-    RecordSyntaxTypeV3
-        { initialField :: Maybe String
-        , otherField :: a
-        }
-    deriving (Eq, Show)
+downgradeRiver :: CompatV1.River -> CompatV0.River
+downgradeRiver = read . show
 
-createNestedRecordSyntaxTypes ::
-       Maybe String
-    -> Maybe String
-    -> Int
-    -> ( RecordSyntaxType (RecordSyntaxType Int)
-       , RecordSyntaxTypeV2 (RecordSyntaxTypeV2 Int)
-       , RecordSyntaxTypeV3 (RecordSyntaxTypeV3 Int))
-createNestedRecordSyntaxTypes a b c =
-    ( RecordSyntaxType a (RecordSyntaxType b c ()) ()
-    , RecordSyntaxTypeV2 a (RecordSyntaxTypeV2 b c () Nothing) () Nothing
-    , RecordSyntaxTypeV3 a (RecordSyntaxTypeV3 b c))
+testCompatibility ::
+       CompatV0.Rec (CompatV0.Rec CompatV0.River)
+    -> CompatV1.Rec (CompatV1.Rec CompatV1.River)
+    -> IO ()
+testCompatibility v0 v1 = do
+    let upgradedV0 = upgradeRec (upgradeRec upgradeRiver) v0
+        downgradedV1 = downgradeRec (downgradeRec downgradeRiver) v1
 
-createNestedRecordSyntaxType ::
-       Maybe String
-    -> Maybe String
-    -> Int
-    -> RecordSyntaxType (RecordSyntaxType Int)
-createNestedRecordSyntaxType a b c =
-    let (v, _, _) = createNestedRecordSyntaxTypes a b c
-     in v
+    res <- poke v0
+    peekAndVerify res upgradedV0
 
-$(Serialize.deriveSerializeWith
-      (Serialize.defaultConfig {Serialize.recordSyntaxWithHeader = True})
-      [d|instance Serialize a => Serialize (RecordSyntaxType a)|])
-
-$(Serialize.deriveSerializeWith
-      (Serialize.defaultConfig {Serialize.recordSyntaxWithHeader = True})
-      [d|instance Serialize a => Serialize (RecordSyntaxTypeV2 a)|])
-
-$(Serialize.deriveSerializeWith
-      (Serialize.defaultConfig {Serialize.recordSyntaxWithHeader = True})
-      [d|instance Serialize a => Serialize (RecordSyntaxTypeV3 a)|])
+    res1 <- poke v1
+    peekAndVerify res1 downgradedV1
 
 --------------------------------------------------------------------------------
 -- Test helpers
@@ -226,13 +202,6 @@ roundtrip val = do
     res <- poke val
     peekAndVerify res val
 
-recordSyntaxCompatibility :: Maybe String -> Maybe String -> Int -> IO ()
-recordSyntaxCompatibility a b c = do
-    let (v1, v2, v3) = createNestedRecordSyntaxTypes a b c
-    res <- poke v1
-    peekAndVerify res v2
-    peekAndVerify res v3
-
 testSerializeList
     :: forall a. (Eq a, Show a, Serialize.Serialize a)
     => Int
@@ -273,11 +242,11 @@ testCases = do
     prop "Array Int"
         $ \(x :: [Int]) -> roundtrip (Array.fromList x)
 
-    prop "RecordSyntaxType"
-        $ \a b c -> roundtrip (createNestedRecordSyntaxType a b c)
+    prop "Compatible Record"
+        $ \(a :: CompatV1.Rec (CompatV0.Rec CompatV1.River)) -> roundtrip a
 
-    prop "RecordSyntaxType - Compatibility"
-        $ \a b c -> recordSyntaxCompatibility a b c
+    prop "Compatibility"
+        $ \a b -> testCompatibility a b
 
     limitQC
         $ prop "CustomDatatype"
