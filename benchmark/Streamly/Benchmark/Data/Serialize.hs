@@ -1,5 +1,4 @@
 {-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE DuplicateRecordFields #-}
 
 #undef FUSION_CHECK
 #ifdef FUSION_CHECK
@@ -47,7 +46,8 @@ import Gauge
 import Streamly.Benchmark.Common
 
 #ifndef USE_UNBOX
-import Streamly.Benchmark.Data.Serialize.TH (genLargeRecords)
+import Streamly.Benchmark.Data.Serialize.RecCompatible
+import Streamly.Benchmark.Data.Serialize.RecNonCompatible
 #endif
 
 #ifdef USE_UNBOX
@@ -289,20 +289,6 @@ mkBinTree = go (generate $ arbitrary)
 #endif
 
 -------------------------------------------------------------------------------
--- Large records
--------------------------------------------------------------------------------
-
-#ifndef USE_UNBOX
-
-$(genLargeRecords "LargeRec" 50)
-$(deriveSerialize ''LargeRec_L)
-$(deriveSerializeWith
-      (defaultConfig {recordSyntaxWithHeader = True})
-      [d|instance Serialize LargeRec_R|])
-
-#endif
-
--------------------------------------------------------------------------------
 -- Size helpers
 -------------------------------------------------------------------------------
 
@@ -517,16 +503,16 @@ benchLargeRec ::
         String
     -> (forall a. (NFData a, Serialize a) =>
         Int -> a -> Int -> IO ())
-    -> LargeRec_L
-    -> LargeRec_R
+    -> RecNonCompatible
+    -> RecCompatible
     -> Int
     -> Benchmark
 benchLargeRec gname f recL recR times =
     bgroup gname
        [ let !n = getSize recL
-           in benchSink "LargeRec_L" times (f n recL)
+           in benchSink "RecNonCompatible" times (f n recL)
        ,  let !n = getSize recR
-           in benchSink "LargeRec_R" times (f n recR)
+           in benchSink "RecCompatible" times (f n recR)
        ]
 #endif
 
@@ -536,7 +522,7 @@ allBenchmarks :: Int -> [Benchmark]
 allBenchmarks times =
 #else
 allBenchmarks ::
-       BinTree Int -> [Int] -> LargeRec_L -> LargeRec_R -> Int -> [Benchmark]
+       BinTree Int -> [Int] -> RecNonCompatible -> RecCompatible -> Int -> [Benchmark]
 allBenchmarks tInt lInt recL recR times =
 #endif
     [ bgroup "sizeOf"
@@ -576,8 +562,8 @@ main = do
     -- nodes 1 level = log_2 (100001/3) + 1 = 16
     !(tInt :: BinTree Int) <- force <$> mkBinTree 16
 
-    !(recL :: LargeRec_L) <- generate arbitrary
-    let !recR = convert_LargeRec_L_to_LargeRec_R recL
+    let !recL = valRecNonCompatible
+    let !recR = valRecCompatible
 
     -- Approximately 100000 constructors, assuming two constructors (Cons, Int)
     -- per element.

@@ -380,7 +380,10 @@ benchmark Data.Serialize
   cpp-options: -DUSE_TH
   main-is: Streamly/Benchmark/Data/Serialize.hs
   build-depends: QuickCheck, template-haskell
-  other-modules: Streamly.Benchmark.Data.Serialize.TH
+  other-modules:
+      Streamly.Benchmark.Data.Serialize.TH
+      Streamly.Benchmark.Data.Serialize.RecCompatible
+      Streamly.Benchmark.Data.Serialize.RecNonCompatible
   if flag(limit-build-mem)
     ghc-options: +RTS -M1000M -RTS
 
