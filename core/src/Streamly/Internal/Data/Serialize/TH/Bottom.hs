@@ -86,9 +86,6 @@ data Config =
           -- serialize the data. Multiple constructors are not supported with
           -- @recordSyntaxWithHeader@ enabled.
           --
-          -- Using this option along with @DuplicateRecordFields@ is currently
-          -- unsupported in compilers >= 9.4.
-          --
           -- __Performance Notes:__
           --
           -- There is a constant regression proportional to
