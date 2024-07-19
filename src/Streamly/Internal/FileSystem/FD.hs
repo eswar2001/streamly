@@ -220,12 +220,13 @@ readArrayUpto :: Int -> Handle -> IO (Array Word8)
 readArrayUpto size (Handle fd) = do
     arr <- MArray.pinnedEmptyOf size
     -- ptr <- mallocPlainForeignPtrAlignedBytes size (alignment (undefined :: Word8))
-    MArray.unsafePinnedAsPtr arr $ \p -> do
+    -- size == byteLen
+    MArray.unsafePinnedAsPtr arr $ \p byteLen -> do
         -- n <- hGetBufSome h p size
 #if MIN_VERSION_base(4,15,0)
-        n <- RawIO.read fd p 0 size
+        n <- RawIO.read fd p 0 byteLen
 #else
-        n <- RawIO.read fd p size
+        n <- RawIO.read fd p byteLen
 #endif
         -- XXX shrink only if the diff is significant
         -- Use unsafeFreezeWithShrink

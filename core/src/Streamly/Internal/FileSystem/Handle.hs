@@ -179,8 +179,9 @@ getChunk :: MonadIO m => Int -> Handle -> m (Array Word8)
 getChunk size h = liftIO $ do
     arr :: MArray.MutArray Word8 <- MArray.pinnedEmptyOf size
     -- ptr <- mallocPlainForeignPtrAlignedBytes size (alignment (undefined :: Word8))
-    MArray.unsafePinnedAsPtr arr $ \p -> do
-        n <- hGetBufSome h p size
+    -- size == byteLen
+    MArray.unsafePinnedAsPtr arr $ \p byteLen -> do
+        n <- hGetBufSome h p byteLen
         -- XXX shrink only if the diff is significant
         return $
             unsafeFreezeWithShrink $
@@ -379,13 +380,8 @@ read = A.concat . readChunks
 {-# INLINABLE putChunk #-}
 putChunk :: MonadIO m => Handle -> Array a -> m ()
 putChunk _ arr | byteLength arr == 0 = return ()
-putChunk h arr = A.unsafePinnedAsPtr arr $ \ptr ->
-    liftIO $ hPutBuf h ptr aLen
-
-    where
-
-    -- XXX We should have the length passed by unsafePinnedAsPtr itself.
-    aLen = A.byteLength arr
+putChunk h arr = A.unsafePinnedAsPtr arr $ \ptr byteLen ->
+    liftIO $ hPutBuf h ptr byteLen
 
 -------------------------------------------------------------------------------
 -- Stream of Arrays IO

@@ -2438,9 +2438,10 @@ fromPtrN len addr = do
     -- memcpy is better than stream copy when the size is known.
     -- XXX We can implement a stream copy in a similar way by streaming Word64
     -- first and then remaining Word8.
-    arr <- new len
+    arr <- emptyOf len
+    -- Here len == byteLen
     _ <- unsafeAsPtr arr
-            (\ptr -> liftIO $ c_memcpy ptr addr (fromIntegral len))
+            (\ptr byteLen -> liftIO $ c_memcpy ptr addr (fromIntegral byteLen))
     return (arr {arrEnd = len})
 
 {-# INLINABLE fromCString# #-}
@@ -2455,7 +2456,7 @@ fromCString# addr = do
     len <- liftIO $ c_strlen (Ptr addr)
     let lenInt = fromIntegral len
     arr <- new lenInt
-    _ <- unsafeAsPtr arr (\ptr -> liftIO $ c_memcpy ptr (Ptr addr) len)
+    _ <- unsafeAsPtr arr (\ptr _ -> liftIO $ c_memcpy ptr (Ptr addr) len)
     return (arr {arrEnd = lenInt})
 
 {-# DEPRECATED fromByteStr# "Please fromCString# instead." #-}
@@ -2476,7 +2477,7 @@ fromW16CString# addr = do
     -- The array type is inferred from c_memcpy type, therefore, it is not the
     -- same as the returned array type.
     arr :: MutArray Word8 <- emptyOf bytes
-    _ <- unsafeAsPtr arr (\ptr -> liftIO
+    _ <- unsafeAsPtr arr (\ptr _ -> liftIO
             $ c_memcpy (castPtr ptr) (Ptr addr) (fromIntegral bytes))
     -- CAUTION! The array type is inferred from the return type and may be
     -- different from the arr type.
@@ -2767,10 +2768,10 @@ splitOn predicate arr =
 {-# INLINE breakOn #-}
 breakOn :: MonadIO m
     => Word8 -> MutArray Word8 -> m (MutArray Word8, Maybe (MutArray Word8))
-breakOn sep arr@MutArray{..} = unsafeAsPtr arr $ \p -> liftIO $ do
+breakOn sep arr@MutArray{..} = unsafeAsPtr arr $ \p byteLen -> liftIO $ do
     -- XXX We do not need memchr here, we can use a Haskell equivalent.
     -- Need efficient stream based primitives that work on Word64.
-    loc <- c_memchr p sep (fromIntegral $ byteLength arr)
+    loc <- c_memchr p sep (fromIntegral byteLen)
     let sepIndex = loc `minusPtr` p
     return $
         if loc == nullPtr
@@ -2899,21 +2900,25 @@ cast arr =
 -- /Pre-release/
 --
 {-# INLINE unsafePinnedAsPtr #-}
-unsafePinnedAsPtr :: MonadIO m => MutArray a -> (Ptr a -> m b) -> m b
+unsafePinnedAsPtr :: MonadIO m => MutArray a -> (Ptr a -> Int -> m b) -> m b
 unsafePinnedAsPtr arr f =
     Unboxed.unsafePinnedAsPtr
-        (arrContents arr) (\ptr -> f (ptr `plusPtr` arrStart arr))
+        (arrContents arr)
+        (\ptr -> f (ptr `plusPtr` arrStart arr) (byteLength arr))
 
 {-# DEPRECATED asPtrUnsafe "Please use unsafePinnedAsPtr instead." #-}
 {-# INLINE asPtrUnsafe #-}
 asPtrUnsafe :: MonadIO m => MutArray a -> (Ptr a -> m b) -> m b
-asPtrUnsafe = unsafePinnedAsPtr
+asPtrUnsafe a f = unsafePinnedAsPtr a (\p _ -> f p)
 
+-- NOTE: unsafeAsPtr is safe to use unsafe with ffi given that the ffi function
+-- does not need the pointer to be valid after the call has completed.
 {-# INLINE unsafeAsPtr #-}
-unsafeAsPtr :: MonadIO m => MutArray a -> (Ptr a -> m b) -> m b
+unsafeAsPtr :: MonadIO m => MutArray a -> (Ptr a -> Int -> m b) -> m b
 unsafeAsPtr arr f =
     Unboxed.unsafeAsPtr
-        (arrContents arr) (\ptr -> f (ptr `plusPtr` arrStart arr))
+        (arrContents arr)
+        (\ptr -> f (ptr `plusPtr` arrStart arr) (byteLength arr))
 
 -------------------------------------------------------------------------------
 -- Equality

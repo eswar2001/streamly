@@ -98,7 +98,7 @@ import qualified Streamly.Data.Fold as FL
 import qualified Streamly.Data.Stream as S
 import qualified Streamly.Data.Unfold as UF
 import qualified Streamly.Internal.Data.Array as A
-    ( unsafeFreeze, unsafePinnedAsPtr, byteLength, pinnedChunksOf,
+    ( unsafeFreeze, unsafePinnedAsPtr, pinnedChunksOf,
       pinnedCreateOf, unsafePinnedCreateOf, lCompactGE )
 import qualified Streamly.Internal.Data.MutArray as MArray
     (MutArray(..), unsafePinnedAsPtr, pinnedEmptyOf)
@@ -263,8 +263,9 @@ readArrayUptoWith
 readArrayUptoWith f size h = do
     arr <- MArray.pinnedEmptyOf size
     -- ptr <- mallocPlainForeignPtrAlignedBytes size (alignment (undefined :: Word8))
-    MArray.unsafePinnedAsPtr arr $ \p -> do
-        n <- f h p size
+    -- size == byteLen
+    MArray.unsafePinnedAsPtr arr $ \p byteLen -> do
+        n <- f h p byteLen
         let v = A.unsafeFreeze
                 $ arr { MArray.arrEnd = n, MArray.arrBound = size }
 
@@ -311,11 +312,8 @@ writeArrayWith :: Unbox a
     -> Array a
     -> IO ()
 writeArrayWith _ _ arr | A.length arr == 0 = return ()
-writeArrayWith f h arr = A.unsafePinnedAsPtr arr $ \ptr -> f h (castPtr ptr) aLen
-
-    where
-
-    aLen = A.byteLength arr
+writeArrayWith f h arr =
+    A.unsafePinnedAsPtr arr $ \ptr byteLen -> f h (castPtr ptr) byteLen
 
 -- | Write an Array to a socket.
 --
