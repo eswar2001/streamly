@@ -40,7 +40,7 @@ module Streamly.Internal.Data.MutArray.Type
 
     -- ** Casting
     , cast
-    , castUnsafe -- XXX unsafeCast
+    , unsafeCast
     , asBytes
     , unsafePinnedAsPtr
     , unsafeAsPtr
@@ -52,7 +52,7 @@ module Streamly.Internal.Data.MutArray.Type
     -- | New arrays are always empty arrays with some reserve capacity to
     -- extend the length without reallocating.
     , emptyOf
-    , newArrayWith -- emptyAlignedWith
+    , emptyWithAligned
     , pinnedEmptyOf
     , pinnedNewAligned -- XXX not required
     -- , new -- uninitialized array of specified length
@@ -63,7 +63,7 @@ module Streamly.Internal.Data.MutArray.Type
 
     -- *** Slicing
     -- | Get a subarray without copying
-    , getSliceUnsafe -- XXX unsafeGetSlice
+    , unsafeGetSlice
     , getSlice
     , splitAt -- XXX should be able to express using getSlice
     , breakOn
@@ -74,7 +74,7 @@ module Streamly.Internal.Data.MutArray.Type
     , unsafeCreateOf
     , unsafePinnedCreateOf
     , pinnedCreateOf
-    , createOfWith
+    , createWithOf
     , createOf
     , revCreateOf
 
@@ -102,7 +102,7 @@ module Streamly.Internal.Data.MutArray.Type
 
     -- ** Random writes
     , putIndex
-    , putIndexUnsafe -- XXX unsafePutIndex
+    , unsafePutIndex
     , putIndices
     -- , putFromThenTo
     -- , putFrom -- start writing at the given position
@@ -110,7 +110,7 @@ module Streamly.Internal.Data.MutArray.Type
     -- , putFromTo
     -- , putFromRev
     -- , putUptoRev
-    , modifyIndexUnsafe -- XXX unsafeModifyIndex
+    , unsafeModifyIndex
     , modifyIndex
     , modifyIndices
     , modify
@@ -121,7 +121,7 @@ module Streamly.Internal.Data.MutArray.Type
 
     -- *** Indexing
     , getIndex
-    , getIndexUnsafe -- XXX unsafeGetIndex
+    , unsafeGetIndex
     -- , getFromThenTo
     , getIndexRev -- getRevIndex?
     , indexReader
@@ -163,7 +163,7 @@ module Streamly.Internal.Data.MutArray.Type
     , blockSize
     , arrayChunkBytes
     , allocBytesToElemCount
-    , realloc -- this is "resize"
+    , reallocBytes
     , grow
     , growExp
     , rightSize
@@ -194,7 +194,7 @@ module Streamly.Internal.Data.MutArray.Type
     , snoc
     , snocLinear
     , snocMay
-    , snocUnsafe -- XXX unsafeSnoc
+    , unsafeSnoc
 
     -- *** Appending streams
     , unsafeAppendN
@@ -207,7 +207,7 @@ module Streamly.Internal.Data.MutArray.Type
     , spliceWith
     , splice
     , spliceExp
-    , spliceUnsafe -- XXX unsafeSplice
+    , unsafeSplice
     -- , putSlice
     -- , appendSlice
     -- , appendSliceFrom
@@ -215,12 +215,12 @@ module Streamly.Internal.Data.MutArray.Type
     -- ** Serialization using Unbox
     , pokeAppend
     , pokeAppendMay
-    , pokeSkipUnsafe -- unsafePokeSkip
+    , unsafePokeSkip
 
     -- ** Deserialization using Unbox
-    , peekUncons
-    , peekUnconsUnsafe -- unsafePeekUncons
-    , peekSkipUnsafe -- unsafePeekSkip
+    , peek
+    , unsafePeek -- unsafePeekUncons
+    , unsafePeekSkip
 
     -- Arrays of arrays
     --  We can add dimensionality parameter to the array type to get
@@ -268,6 +268,20 @@ module Streamly.Internal.Data.MutArray.Type
     , c_memchr
 
     -- * Deprecated
+    , realloc
+    , createOfWith
+    , peekUncons
+    , peekUnconsUnsafe
+    , castUnsafe
+    , newArrayWith
+    , getSliceUnsafe
+    , putIndexUnsafe
+    , modifyIndexUnsafe
+    , getIndexUnsafe
+    , snocUnsafe
+    , spliceUnsafe
+    , pokeSkipUnsafe
+    , peekSkipUnsafe
     , asPtrUnsafe
     , writeChunks
     , flattenArrays
@@ -304,6 +318,7 @@ module Streamly.Internal.Data.MutArray.Type
 where
 
 #include "assert.hs"
+#include "deprecation.h"
 #include "inline.hs"
 #include "ArrayMacros.h"
 #include "MachDeps.h"
@@ -484,7 +499,7 @@ isPinned MutArray{..} = Unboxed.isPinned arrContents
 
 -- XXX Rename to emptyAlignedWith, alignSize should be first arg.
 
--- | @newArrayWith allocator alignment count@ allocates a new array of zero
+-- | @emptyWithAligned allocator alignment count@ allocates a new array of zero
 -- length and with a capacity to hold @count@ elements, using @allocator
 -- size alignment@ as the memory allocator function.
 --
@@ -494,10 +509,10 @@ isPinned MutArray{..} = Unboxed.isPinned arrContents
 -- Alignment is ignored if the allocator allocates unpinned memory.
 --
 -- /Pre-release/
-{-# INLINE newArrayWith #-}
-newArrayWith :: forall m a. (MonadIO m, Unbox a)
+{-# INLINE emptyWithAligned #-}
+newArrayWith, emptyWithAligned :: forall m a. (MonadIO m, Unbox a)
     => (Int -> Int -> m MutByteArray) -> Int -> Int -> m (MutArray a)
-newArrayWith alloc alignSize count = do
+emptyWithAligned alloc alignSize count = do
     let size = max (count * SIZE_OF(a)) 0
     contents <- alloc size alignSize
     return $ MutArray
@@ -546,7 +561,7 @@ newBytesAs ps bytes = do
 -- The memory of the array is uninitialized and the allocation is aligned as
 -- per the 'Unboxed' instance of the type.
 --
--- > pinnedNewBytes = (castUnsafe :: Array Word8 -> a) . pinnedEmptyOf
+-- > pinnedNewBytes = (unsafeCast :: Array Word8 -> a) . pinnedEmptyOf
 --
 -- /Pre-release/
 {-# INLINE pinnedNewBytes #-}
@@ -558,19 +573,19 @@ pinnedNewBytes :: MonadIO m =>
     Int -> m (MutArray a)
 pinnedNewBytes = newBytesAs Pinned
 
--- | Like 'newArrayWith' but using an allocator is a pinned memory allocator and
+-- | Like 'emptyWithAligned' but using an allocator is a pinned memory allocator and
 -- the alignment is dictated by the 'Unboxed' instance of the type.
 --
 -- /Internal/
 {-# INLINE pinnedNewAligned #-}
 pinnedNewAligned :: (MonadIO m, Unbox a) => Int -> Int -> m (MutArray a)
 pinnedNewAligned =
-    newArrayWith (\s a -> liftIO $ Unboxed.pinnedNewAlignedBytes s a)
+    emptyWithAligned (\s a -> liftIO $ Unboxed.pinnedNewAlignedBytes s a)
 
 {-# INLINE newAs #-}
 newAs :: (MonadIO m, Unbox a) => PinnedState -> Int -> m (MutArray a)
 newAs ps =
-    newArrayWith
+    emptyWithAligned
         (\s _ -> liftIO $ Unboxed.newBytesAs ps s)
         (error "new: alignment is not used in unpinned arrays.")
 
@@ -607,10 +622,10 @@ new = emptyOf
 -- the index is out of bounds of the array.
 --
 -- /Pre-release/
-{-# INLINE putIndexUnsafe #-}
-putIndexUnsafe :: forall m a. (MonadIO m, Unbox a)
+{-# INLINE unsafePutIndex #-}
+putIndexUnsafe, unsafePutIndex :: forall m a. (MonadIO m, Unbox a)
     => Int -> MutArray a -> a -> m ()
-putIndexUnsafe i MutArray{..} x = do
+unsafePutIndex i MutArray{..} x = do
     let index = INDEX_OF(arrStart, i, a)
     assert (i >= 0 && INDEX_VALID(index, arrEnd, a)) (return ())
     liftIO $ pokeAt index arrContents  x
@@ -652,9 +667,9 @@ putIndices arr = FL.foldlM' step (return ())
 -- Unsafe because it does not check the bounds of the array.
 --
 -- /Pre-release/
-modifyIndexUnsafe :: forall m a b. (MonadIO m, Unbox a) =>
+modifyIndexUnsafe, unsafeModifyIndex :: forall m a b. (MonadIO m, Unbox a) =>
     Int -> MutArray a -> (a -> (a, b)) -> m b
-modifyIndexUnsafe i MutArray{..} f = liftIO $ do
+unsafeModifyIndex i MutArray{..} f = liftIO $ do
         let index = INDEX_OF(arrStart,i,a)
         assert (i >= 0 && INDEX_NEXT(index,a) <= arrEnd) (return ())
         r <- peekAt index arrContents
@@ -878,7 +893,6 @@ reallocExplicitAs ps elemSize newCapacityInBytes MutArray{..} = do
         , arrBound = newCapInBytes
         }
 
--- XXX Should these be called reallocBytes etc?
 -- XXX We may also need reallocAs to allocate as pinned/unpinned explicitly. In
 -- fact clone/pinnedClone can be implemented using reallocAs.
 
@@ -891,25 +905,25 @@ reallocExplicitAs ps elemSize newCapacityInBytes MutArray{..} = do
 -- 'largeObjectThreshold' then it is rounded up to the block size (4K).
 --
 -- If the original array is pinned, the newly allocated array is also pinned.
-{-# INLINABLE realloc #-}
-realloc :: forall m a. (MonadIO m, Unbox a) => Int -> MutArray a -> m (MutArray a)
-realloc bytes arr =
+{-# INLINABLE reallocBytes #-}
+realloc, reallocBytes :: forall m a. (MonadIO m, Unbox a) => Int -> MutArray a -> m (MutArray a)
+reallocBytes bytes arr =
     let ps =
             if isPinned arr
             then Pinned
             else Unpinned
      in liftIO $ reallocExplicitAs ps (SIZE_OF(a)) bytes arr
 
--- | @reallocWith label capSizer minIncrBytes array@. The label is used
+-- | @reallocBytesWith label capSizer minIncrBytes array@. The label is used
 -- in error messages and the capSizer is used to determine the capacity of the
 -- new array in bytes given the current byte length of the array.
-reallocWith :: forall m a. (MonadIO m , Unbox a) =>
+reallocBytesWith :: forall m a. (MonadIO m , Unbox a) =>
        String
     -> (Int -> Int)
     -> Int
     -> MutArray a
     -> m (MutArray a)
-reallocWith label capSizer minIncrBytes arr = do
+reallocBytesWith label capSizer minIncrBytes arr = do
     let oldSizeBytes = arrEnd arr - arrStart arr
         newCapBytes = capSizer oldSizeBytes
         newSizeBytes = oldSizeBytes + minIncrBytes
@@ -1028,10 +1042,10 @@ snocNewEnd newEnd arr@MutArray{..} x = liftIO $ do
 -- array does not have enough space to append the element.
 --
 -- /Internal/
-{-# INLINE snocUnsafe #-}
-snocUnsafe :: forall m a. (MonadIO m, Unbox a) =>
+{-# INLINE unsafeSnoc #-}
+snocUnsafe, unsafeSnoc :: forall m a. (MonadIO m, Unbox a) =>
     MutArray a -> a -> m (MutArray a)
-snocUnsafe arr@MutArray{..} = snocNewEnd (INDEX_NEXT(arrEnd,a)) arr
+unsafeSnoc arr@MutArray{..} = snocNewEnd (INDEX_NEXT(arrEnd,a)) arr
 
 -- | Like 'snoc' but does not reallocate when pre-allocated array capacity
 -- becomes full.
@@ -1054,8 +1068,8 @@ snocWithRealloc :: forall m a. (MonadIO m, Unbox a) =>
     -> a
     -> m (MutArray a)
 snocWithRealloc sizer arr x = do
-    arr1 <- reallocWith "snocWith" sizer (SIZE_OF(a)) arr
-    snocUnsafe arr1 x
+    arr1 <- reallocBytesWith "snocWith" sizer (SIZE_OF(a)) arr
+    unsafeSnoc arr1 x
 
 -- | @snocWith sizer arr elem@ mutates @arr@ to append @elem@. The length of
 -- the array increases by 1.
@@ -1145,9 +1159,9 @@ pokeAppendUnsafe arr@MutArray{..} = pokeNewEnd (arrEnd + SIZE_OF(a)) arr
 
 -- | Skip the specified number of bytes in the array. The data in the skipped
 -- region remains uninitialzed.
-{-# INLINE pokeSkipUnsafe #-}
-pokeSkipUnsafe :: Int -> MutArray Word8 -> MutArray Word8
-pokeSkipUnsafe n arr@MutArray{..} =  do
+{-# INLINE unsafePokeSkip #-}
+pokeSkipUnsafe, unsafePokeSkip :: Int -> MutArray Word8 -> MutArray Word8
+unsafePokeSkip n arr@MutArray{..} =  do
     let newEnd = arrEnd + n
      in assert (newEnd <= arrBound) (arr {arrEnd = newEnd})
 
@@ -1171,7 +1185,7 @@ pokeWithRealloc :: forall m a. (MonadIO m, Unbox a) =>
     -> a
     -> m (MutArray Word8)
 pokeWithRealloc sizer arr x = do
-    arr1 <- liftIO $ reallocWith "pokeWithRealloc" sizer (SIZE_OF(a)) arr
+    arr1 <- liftIO $ reallocBytesWith "pokeWithRealloc" sizer (SIZE_OF(a)) arr
     pokeAppendUnsafe arr1 x
 
 {-# INLINE pokeAppendWith #-}
@@ -1191,7 +1205,7 @@ pokeAppendWith allocSize arr x = liftIO $ do
 --
 -- Definition:
 --
--- >>> pokeAppend arr x = MutArray.castUnsafe <$> MutArray.snoc (MutArray.castUnsafe arr) x
+-- >>> pokeAppend arr x = MutArray.unsafeCast <$> MutArray.snoc (MutArray.unsafeCast arr) x
 --
 {-# INLINE pokeAppend #-}
 pokeAppend :: forall m a. (MonadIO m, Unbox a) =>
@@ -1210,10 +1224,10 @@ pokeAppend = pokeAppendWith f
 -- lucky may cause a segfault.
 --
 -- /Internal/
-{-# INLINE peekUnconsUnsafe #-}
-peekUnconsUnsafe :: forall m a. (MonadIO m, Unbox a) =>
+{-# INLINE unsafePeek #-}
+peekUnconsUnsafe, unsafePeek :: forall m a. (MonadIO m, Unbox a) =>
     MutArray Word8 -> m (a, MutArray Word8)
-peekUnconsUnsafe MutArray{..} = do
+unsafePeek MutArray{..} = do
     let start1 = arrStart + SIZE_OF(a)
     assert (start1 <= arrEnd) (return ())
     liftIO $ do
@@ -1221,18 +1235,18 @@ peekUnconsUnsafe MutArray{..} = do
         return (r, MutArray arrContents start1 arrEnd arrBound)
 
 -- | Discard the specified number of bytes in the array.
-{-# INLINE peekSkipUnsafe #-}
-peekSkipUnsafe :: Int -> MutArray Word8 -> MutArray Word8
-peekSkipUnsafe n MutArray{..} =
+{-# INLINE unsafePeekSkip #-}
+peekSkipUnsafe, unsafePeekSkip :: Int -> MutArray Word8 -> MutArray Word8
+unsafePeekSkip n MutArray{..} =
     let start1 = arrStart + n
      in assert (start1 <= arrEnd) (MutArray arrContents start1 arrEnd arrBound)
 
 -- | Create a Haskell value from its unboxed representation from the head of a
 -- byte array, return the value and the remaining array.
-{-# INLINE peekUncons #-}
-peekUncons :: forall m a. (MonadIO m, Unbox a) =>
+{-# INLINE peek #-}
+peekUncons, peek :: forall m a. (MonadIO m, Unbox a) =>
     MutArray Word8 -> m (Maybe a, MutArray Word8)
-peekUncons arr@MutArray{..} = do
+peek arr@MutArray{..} = do
     let start1 = arrStart + SIZE_OF(a)
     if start1 > arrEnd
     then return (Nothing, arr)
@@ -1249,9 +1263,9 @@ peekUncons arr@MutArray{..} = do
 -- | Return the element at the specified index without checking the bounds.
 --
 -- Unsafe because it does not check the bounds of the array.
-{-# INLINE_NORMAL getIndexUnsafe #-}
-getIndexUnsafe :: forall m a. (MonadIO m, Unbox a) => Int -> MutArray a -> m a
-getIndexUnsafe i MutArray{..} = do
+{-# INLINE_NORMAL unsafeGetIndex #-}
+getIndexUnsafe, unsafeGetIndex :: forall m a. (MonadIO m, Unbox a) => Int -> MutArray a -> m a
+unsafeGetIndex i MutArray{..} = do
     let index = INDEX_OF(arrStart,i,a)
     assert (i >= 0 && INDEX_VALID(index,arrEnd,a)) (return ())
     liftIO $ peekAt index arrContents
@@ -1338,13 +1352,13 @@ getIndices = indexReader
 -- /Unsafe/
 --
 -- /Pre-release/
-{-# INLINE getSliceUnsafe #-}
-getSliceUnsafe :: forall a. Unbox a
+{-# INLINE unsafeGetSlice #-}
+getSliceUnsafe, unsafeGetSlice :: forall a. Unbox a
     => Int -- ^ from index
     -> Int -- ^ length of the slice
     -> MutArray a
     -> MutArray a
-getSliceUnsafe index len (MutArray contents start e _) =
+unsafeGetSlice index len (MutArray contents start e _) =
     let fp1 = INDEX_OF(start,index,a)
         end = fp1 + (len * SIZE_OF(a))
      in assert
@@ -2003,7 +2017,7 @@ unsafeAppendN n action = fmap fromArrayUnsafe $ FL.foldlM' step initial
         -- otherwise we lose that space.
         arr1 <-
             if free < needed
-            then noinline reallocWith "unsafeAppendN" (+ needed) needed arr
+            then noinline reallocBytesWith "unsafeAppendN" (+ needed) needed arr
             else return arr
         return $ toArrayUnsafe arr1
 
@@ -2140,22 +2154,22 @@ pinnedWriteNUnsafe :: forall m a. (MonadIO m, Unbox a)
     => Int -> Fold m a (MutArray a)
 pinnedWriteNUnsafe = unsafePinnedCreateOf
 
--- | @createOfWith alloc n@ folds a maximum of @n@ elements into an array
+-- | @createWithOf alloc n@ folds a maximum of @n@ elements into an array
 -- allocated using the @alloc@ function.
 --
--- >>> createOfWith alloc n = Fold.take n (MutArray.unsafeCreateOfWith alloc n)
--- >>> createOfWith alloc n = MutArray.appendN (alloc n) n
+-- >>> createWithOf alloc n = Fold.take n (MutArray.unsafeCreateOfWith alloc n)
+-- >>> createWithOf alloc n = MutArray.appendN (alloc n) n
 --
-{-# INLINE_NORMAL createOfWith #-}
-createOfWith :: forall m a. (MonadIO m, Unbox a)
+{-# INLINE_NORMAL createWithOf #-}
+createOfWith, createWithOf :: forall m a. (MonadIO m, Unbox a)
     => (Int -> m (MutArray a)) -> Int -> Fold m a (MutArray a)
-createOfWith alloc n = FL.take n (unsafeCreateOfWith alloc n)
+createWithOf alloc n = FL.take n (unsafeCreateOfWith alloc n)
 
-{-# DEPRECATED writeNWith "Please use createOfWith instead." #-}
+{-# DEPRECATED writeNWith "Please use createWithOf instead." #-}
 {-# INLINE writeNWith #-}
 writeNWith :: forall m a. (MonadIO m, Unbox a)
     => (Int -> m (MutArray a)) -> Int -> Fold m a (MutArray a)
-writeNWith = createOfWith
+writeNWith = createWithOf
 
 {-# INLINE_NORMAL writeNAs #-}
 writeNAs ::
@@ -2163,12 +2177,12 @@ writeNAs ::
     => PinnedState
     -> Int
     -> Fold m a (MutArray a)
-writeNAs ps = createOfWith (newAs ps)
+writeNAs ps = createWithOf (newAs ps)
 
 -- | @createOf n@ folds a maximum of @n@ elements from the input stream to an
 -- 'MutArray'.
 --
--- >>> createOf = MutArray.createOfWith MutArray.emptyOf
+-- >>> createOf = MutArray.createWithOf MutArray.emptyOf
 -- >>> createOf n = Fold.take n (MutArray.unsafeCreateOf n)
 -- >>> createOf n = MutArray.appendN n (MutArray.emptyOf n)
 --
@@ -2218,7 +2232,7 @@ writeRevNWithUnsafe alloc n = fromArrayUnsafe <$> FL.foldlM' step initial
         return
           $ ArrayUnsafe contents ptr end
 
--- | Like createOfWith but writes the array in reverse order.
+-- | Like createWithOf but writes the array in reverse order.
 --
 -- /Internal/
 {-# INLINE_NORMAL writeRevNWith #-}
@@ -2241,7 +2255,7 @@ writeRevN = revCreateOf
 -- | @pinnedWriteNAligned align n@ folds a maximum of @n@ elements from the
 -- input stream to a 'MutArray' aligned to the given size.
 --
--- >>> pinnedWriteNAligned align = MutArray.createOfWith (MutArray.pinnedNewAligned align)
+-- >>> pinnedWriteNAligned align = MutArray.createWithOf (MutArray.pinnedNewAligned align)
 -- >>> pinnedWriteNAligned align n = MutArray.appendN n (MutArray.pinnedNewAligned align n)
 --
 -- /Pre-release/
@@ -2249,7 +2263,7 @@ writeRevN = revCreateOf
 {-# INLINE_NORMAL pinnedWriteNAligned #-}
 pinnedWriteNAligned :: forall m a. (MonadIO m, Unbox a)
     => Int -> Int -> Fold m a (MutArray a)
-pinnedWriteNAligned align = createOfWith (pinnedNewAligned align)
+pinnedWriteNAligned align = createWithOf (pinnedNewAligned align)
 
 -- XXX Buffer to a list instead?
 
@@ -2293,8 +2307,8 @@ writeWithAs ps elemCount =
         let oldSize = end - start
             newSize = max (oldSize * 2) 1
         arr1 <- liftIO $ reallocExplicitAs ps (SIZE_OF(a)) newSize arr
-        snocUnsafe arr1 x
-    step arr x = snocUnsafe arr x
+        unsafeSnoc arr1 x
+    step arr x = unsafeSnoc arr x
 
     extract = liftIO . rightSize
 
@@ -2522,7 +2536,7 @@ fromChunkskAs ps as = do
     len <- arrayStreamKLength as
     arr <- newAs ps len
     -- XXX is StreamK fold faster or StreamD fold?
-    K.foldlM' spliceUnsafe (pure arr) as
+    K.foldlM' unsafeSplice (pure arr) as
     -- fromStreamDN len $ D.unfoldMany reader $ D.fromStreamK as
 
 -- XXX Need to compare this with fromChunks and fromChunkList and keep the
@@ -2674,10 +2688,10 @@ spliceCopy arr1 arr2 = do
 -- | Really really unsafe, appends the second array into the first array. If
 -- the first array does not have enough space it may cause silent data
 -- corruption or if you are lucky a segfault.
-{-# INLINE spliceUnsafe #-}
-spliceUnsafe :: MonadIO m =>
+{-# INLINE unsafeSplice #-}
+spliceUnsafe, unsafeSplice :: MonadIO m =>
     MutArray a -> MutArray a -> m (MutArray a)
-spliceUnsafe dst src =
+unsafeSplice dst src =
     do
          let startSrc = arrStart src
              srcLen = arrEnd src - startSrc
@@ -2718,7 +2732,7 @@ spliceWith sizer dst@(MutArray _ start end bound) src = do
                     ++ "sizer function passed."
             realloc newSizeInBytes dst
         else return dst
-    spliceUnsafe dst1 src
+    unsafeSplice dst1 src
 
 -- | The first array is mutated to append the second array. If there is no
 -- reserved space available in the first array a new allocation of exact
@@ -2761,7 +2775,7 @@ spliceExp = spliceWith (\l1 l2 -> max (l1 * 2) (l1 + l2))
 splitOn :: (MonadIO m, Unbox a) =>
     (a -> Bool) -> MutArray a -> Stream m (MutArray a)
 splitOn predicate arr =
-    fmap (\(i, len) -> getSliceUnsafe i len arr)
+    fmap (\(i, len) -> unsafeGetSlice i len arr)
         $ D.indexOnSuffix predicate (read arr)
 
 -- | Drops the separator byte
@@ -2838,18 +2852,18 @@ splitAt i arr =
 --
 -- /Pre-release/
 --
-castUnsafe ::
+castUnsafe, unsafeCast ::
 #ifdef DEVBUILD
     Unbox b =>
 #endif
     MutArray a -> MutArray b
-castUnsafe (MutArray contents start end bound) =
+unsafeCast (MutArray contents start end bound) =
     MutArray contents start end bound
 
 -- | Cast an @MutArray a@ into an @MutArray Word8@.
 --
 asBytes :: MutArray a -> MutArray Word8
-asBytes = castUnsafe
+asBytes = unsafeCast
 
 -- | Cast an array having elements of type @a@ into an array having elements of
 -- type @b@. The length of the array should be a multiple of the size of the
@@ -2861,7 +2875,7 @@ cast arr =
         r = len `mod` SIZE_OF(b)
      in if r /= 0
         then Nothing
-        else Just $ castUnsafe arr
+        else Just $ unsafeCast arr
 
 -- XXX We can provide another API for "unsafe" FFI calls passing an unlifted
 -- pointer to the FFI call. For unsafe calls we do not need to pin the array.
@@ -3017,7 +3031,7 @@ pCompactLeAs ps maxElems = Parser step initial extract
                     then liftIO $ reallocExplicitAs
                             ps (SIZE_OF(a)) maxBytes buf
                     else return buf
-                buf2 <- spliceUnsafe buf1 arr
+                buf2 <- unsafeSplice buf1 arr
                 return $ Parser.Partial 0 (Just buf2)
 
     extract Nothing = return $ Parser.Done 0 nil
@@ -3100,7 +3114,7 @@ compactLeAs ps maxElems (D.Stream step state) =
                             then liftIO $ reallocExplicitAs
                                     ps (SIZE_OF(a)) maxBytes buf
                             else return buf
-                    buf2 <- spliceUnsafe buf1 arr
+                    buf2 <- unsafeSplice buf1 arr
                     return $ D.Skip (SpliceBuffering s buf2)
             D.Skip s -> return $ D.Skip (SpliceBuffering s buf)
             D.Stop -> return $ D.Skip (SpliceYielding buf SpliceFinish)
@@ -3145,7 +3159,7 @@ fCompactGeAs ps minElems = Fold step initial extract extract
             then liftIO $ reallocExplicitAs
                     ps (SIZE_OF(a)) (max minBytes len) buf
             else return buf
-        buf2 <- spliceUnsafe buf1 arr
+        buf2 <- unsafeSplice buf1 arr
         if len >= minBytes
         then return $ FL.Done buf2
         else return $ FL.Partial (Just buf2)
@@ -3217,7 +3231,7 @@ lCompactGeAs ps minElems (Fold step1 initial1 _ final1) =
                 then liftIO $ reallocExplicitAs
                         ps (SIZE_OF(a)) (max minBytes len) buf
                 else return buf
-        buf2 <- spliceUnsafe buf1 arr
+        buf2 <- unsafeSplice buf1 arr
         runInner len r1 buf2
 
     -- XXX Several folds do extract >=> final, therefore, we need to make final
@@ -3327,7 +3341,7 @@ strip eq arr@MutArray{..} = liftIO $ do
 bubble :: (MonadIO m, Unbox a) => (a -> a -> Ordering) -> MutArray a -> m ()
 bubble cmp0 arr =
     when (l > 1) $ do
-        x <- getIndexUnsafe (l - 1) arr
+        x <- unsafeGetIndex (l - 1) arr
         go x (l - 2)
 
         where
@@ -3337,10 +3351,33 @@ bubble cmp0 arr =
         go x i =
             if i >= 0
             then do
-                x1 <- getIndexUnsafe i arr
+                x1 <- unsafeGetIndex i arr
                 case x `cmp0` x1 of
                     LT -> do
-                        putIndexUnsafe (i + 1) arr x1
+                        unsafePutIndex (i + 1) arr x1
                         go x (i - 1)
-                    _ -> putIndexUnsafe (i + 1) arr x
-            else putIndexUnsafe (i + 1) arr x
+                    _ -> unsafePutIndex (i + 1) arr x
+            else unsafePutIndex (i + 1) arr x
+
+--------------------------------------------------------------------------------
+-- Renaming
+--------------------------------------------------------------------------------
+
+RENAME(realloc, reallocBytes)
+RENAME(castUnsafe, unsafeCast)
+RENAME(newArrayWith, emptyWithAligned)
+RENAME(getSliceUnsafe, unsafeGetSlice)
+RENAME(putIndexUnsafe, unsafePutIndex)
+RENAME(modifyIndexUnsafe, unsafeModifyIndex)
+RENAME(getIndexUnsafe, unsafeGetIndex)
+RENAME(snocUnsafe, unsafeSnoc)
+RENAME(spliceUnsafe, unsafeSplice)
+RENAME(pokeSkipUnsafe, unsafePokeSkip)
+RENAME(peekSkipUnsafe, unsafePeekSkip)
+RENAME(peekUncons, peek)
+RENAME(peekUnconsUnsafe, unsafePeek)
+
+-- This renaming can be done directly without deprecations. But I'm keeping this
+-- intentionally. Packdiff should be able to point out such APIs that we can
+-- just remove.
+RENAME(createOfWith, createWithOf)

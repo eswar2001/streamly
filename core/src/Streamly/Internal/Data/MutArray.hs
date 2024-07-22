@@ -79,7 +79,7 @@ slicerFromLen :: forall m a. (Monad m, Unbox a)
     -> Int -- ^ length of the slice
     -> Unfold m (MutArray a) (MutArray a)
 slicerFromLen from len =
-    let mkSlice arr (i, n) = return $ getSliceUnsafe i n arr
+    let mkSlice arr (i, n) = return $ unsafeGetSlice i n arr
      in Unfold.mapM2 mkSlice (sliceIndexerFromLen from len)
 
 {-# DEPRECATED getSlicesFromLen "Please use slicerFromLen instead." #-}
