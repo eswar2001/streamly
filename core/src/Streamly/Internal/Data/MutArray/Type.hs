@@ -335,8 +335,8 @@ import Foreign.Ptr (plusPtr, minusPtr, nullPtr, castPtr)
 import Streamly.Internal.Data.MutByteArray.Type
     ( MutByteArray(..)
     , PinnedState(..)
-    , getMutableByteArray#
-    , putSliceUnsafe
+    , getMutByteArray#
+    , unsafePutSlice
     )
 import Streamly.Internal.Data.Unbox (Unbox(..))
 import GHC.Base
@@ -549,7 +549,7 @@ newBytesAs :: MonadIO m =>
 #endif
     PinnedState -> Int -> m (MutArray a)
 newBytesAs ps bytes = do
-    contents <- liftIO $ Unboxed.newBytesAs ps bytes
+    contents <- liftIO $ Unboxed.newAs ps bytes
     return $ MutArray
         { arrContents = contents
         , arrStart = 0
@@ -577,16 +577,16 @@ pinnedNewBytes = newBytesAs Pinned
 -- the alignment is dictated by the 'Unboxed' instance of the type.
 --
 -- /Internal/
+{-# DEPRECATED pinnedNewAligned "Please use pinnedEmptyOf to create a Word8 array and cast it accordingly." #-}
 {-# INLINE pinnedNewAligned #-}
 pinnedNewAligned :: (MonadIO m, Unbox a) => Int -> Int -> m (MutArray a)
-pinnedNewAligned =
-    emptyWithAligned (\s a -> liftIO $ Unboxed.pinnedNewAlignedBytes s a)
+pinnedNewAligned = emptyWithAligned (\s _ -> liftIO $ Unboxed.pinnedNew s)
 
 {-# INLINE newAs #-}
 newAs :: (MonadIO m, Unbox a) => PinnedState -> Int -> m (MutArray a)
 newAs ps =
     emptyWithAligned
-        (\s _ -> liftIO $ Unboxed.newBytesAs ps s)
+        (\s _ -> liftIO $ Unboxed.newAs ps s)
         (error "new: alignment is not used in unpinned arrays.")
 
 -- XXX can unaligned allocation be more efficient when alignment is not needed?
@@ -2636,7 +2636,7 @@ cloneAs ps src =
         let startSrc = arrStart src
             srcLen = arrEnd src - startSrc
         newArrContents <-
-            Unboxed.cloneSliceUnsafeAs ps startSrc srcLen (arrContents src)
+            Unboxed.unsafeCloneSliceAs ps startSrc srcLen (arrContents src)
         return $ MutArray newArrContents 0 srcLen srcLen
 
 -- | Clones a MutArray.
@@ -2689,8 +2689,8 @@ spliceCopy arr1 arr2 = do
         if Unboxed.isPinned (arrContents arr1)
         then liftIO $ Unboxed.pinnedNew len
         else liftIO $ Unboxed.new len
-    putSliceUnsafe (arrContents arr1) start1 newArrContents 0 len1
-    putSliceUnsafe (arrContents arr2) start2 newArrContents len1 len2
+    unsafePutSlice (arrContents arr1) start1 newArrContents 0 len1
+    unsafePutSlice (arrContents arr2) start2 newArrContents len1 len2
     return $ MutArray newArrContents 0 len len
 
 -- | Really really unsafe, appends the second array into the first array. If
@@ -2705,7 +2705,7 @@ unsafeSplice dst src =
              srcLen = arrEnd src - startSrc
              endDst = arrEnd dst
          assertM(endDst + srcLen <= arrBound dst)
-         putSliceUnsafe
+         unsafePutSlice
              (arrContents src) startSrc (arrContents dst) endDst srcLen
          return $ dst {arrEnd = endDst + srcLen}
 
@@ -2958,8 +2958,8 @@ unsafeAsPtr arr f =
 {-# INLINE byteCmp #-}
 byteCmp :: MonadIO m => MutArray a -> MutArray a -> m Ordering
 byteCmp arr1 arr2 = do
-    let marr1 = getMutableByteArray# (arrContents arr1)
-        marr2 = getMutableByteArray# (arrContents arr2)
+    let marr1 = getMutByteArray# (arrContents arr1)
+        marr2 = getMutByteArray# (arrContents arr2)
         !(I# st1#) = arrStart arr1
         !(I# st2#) = arrStart arr2
         !(I# len#) = byteLength arr1
