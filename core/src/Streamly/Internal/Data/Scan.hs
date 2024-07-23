@@ -142,6 +142,9 @@ instance Functor m => Functor (Scan m a) where
 -- Category
 -------------------------------------------------------------------------------
 
+-- XXX We can call this append, because corresponding operation in stream is
+-- also append.
+
 -- | Connect two scans in series. Attach the first scan on the output of the
 -- second scan.
 --
