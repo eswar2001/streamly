@@ -113,7 +113,7 @@ module Streamly.Internal.FileSystem.Event.Darwin
     , watchWith
 
     -- * Handling Events
-    , Event
+    , Event(..)
     , getEventId
     , getAbsPath
 

@@ -28,7 +28,7 @@ module Streamly.Internal.FileSystem.Event
     -- , watchRecursive
 
     -- * Handling Events
-    , Event
+    , Event(..)
     , getAbsPath
 
     -- ** Item CRUD events
@@ -51,13 +51,13 @@ import Streamly.Data.Array (Array)
 import Streamly.Data.Stream (Stream)
 
 #if defined(CABAL_OS_DARWIN)
-import Streamly.Internal.FileSystem.Event.Darwin (Event)
+import Streamly.Internal.FileSystem.Event.Darwin (Event(..))
 import qualified Streamly.Internal.FileSystem.Event.Darwin as Event
 #elif defined(CABAL_OS_LINUX)
-import Streamly.Internal.FileSystem.Event.Linux (Event)
+import Streamly.Internal.FileSystem.Event.Linux (Event(..))
 import qualified Streamly.Internal.FileSystem.Event.Linux as Event
 #elif defined(CABAL_OS_WINDOWS)
-import Streamly.Internal.FileSystem.Event.Windows (Event)
+import Streamly.Internal.FileSystem.Event.Windows (Event(..))
 import qualified Streamly.Internal.FileSystem.Event.Windows as Event
 #else
 #error "FS Events not supported on this platform"
